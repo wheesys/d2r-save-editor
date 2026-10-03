@@ -1,0 +1,19 @@
+# 样本文件（存档、数据表）不入库
+samples/
+
+# Rust
+target/
+Cargo.lock
+
+# Node / 前端
+node_modules/
+dist/
+
+# 本地工具
+.spec-workflow/
+
+# 系统与编辑器
+.DS_Store
+*.swp
+.idea/
+.vscode/
