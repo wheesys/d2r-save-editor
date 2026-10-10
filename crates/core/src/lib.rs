@@ -14,6 +14,7 @@
 //! - **失败安全**：解析不了就报错，绝不"猜着写"；
 //! - **未知数据透传**：读到时原样保留，写回时不丢弃。
 
+pub mod blueprint;
 pub mod d2i;
 pub mod edit;
 pub mod header;
@@ -21,6 +22,9 @@ pub mod items;
 pub mod layout;
 pub mod save;
 
+pub use blueprint::{
+    export_blueprint, parse_blueprint, BlueprintStat, ImportOutcome, ItemBlueprint,
+};
 pub use d2i::{D2iError, SharedStash};
 pub use edit::{CharacterView, Edit, EditError, EditSession, SkillView};
 pub use header::{HeaderError, SaveHeader, SaveVersion, MAGIC};

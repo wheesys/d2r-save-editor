@@ -17,6 +17,7 @@ pub mod dataset;
 pub mod itemname;
 pub mod placement;
 pub mod skillname;
+pub mod statlimit;
 pub mod strings;
 pub mod table;
 
@@ -27,6 +28,7 @@ pub use placement::{
     ContainerSpec, Issue, PlacedItem, RegionReport, Severity, ValidationReport,
 };
 pub use skillname::SkillNamer;
+pub use statlimit::{StatLimit, StatLimits};
 pub use strings::Strings;
 pub use table::{DataError, Table};
 

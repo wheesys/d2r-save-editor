@@ -12,6 +12,7 @@ authors.workspace = true
 # 先用它跑通往返一致性；是否长期采用由 tests/roundtrip.rs 的实测结果决定。
 d2s = "0.1.0"
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 [features]
 default = []

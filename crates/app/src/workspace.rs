@@ -41,6 +41,8 @@ pub struct Workspace {
     pub lang: String,
     /// 容器/佣兵布局设置（读不出来时由用户勾选）。
     layout: LayoutSettings,
+    /// 属性取值上限（来自数据表的位宽列；空表表示不限制）。
+    stat_limits: d2r_data::StatLimits,
     /// 当前编辑会话。
     session: Option<EditSession>,
 }
@@ -127,11 +129,15 @@ impl Workspace {
             }
         }
 
+        // 属性位宽上限：装配完表之后立刻取一次（避免 apply 时再借表）
+        let stat_limits = d2r_data::StatLimits::from_store(&mut tables);
+
         Self {
             game_dir,
             mod_tables_dir: mod_tables,
             data_source: source,
             tables,
+            stat_limits,
             strings,
             lang: "zhCN".to_string(),
             layout: LayoutSettings::default(),
@@ -337,6 +343,43 @@ impl Workspace {
             .collect())
     }
 
+    /// 导出全部物品为蓝图（JSON 形态）。
+    pub fn export_blueprints(&self) -> Result<Vec<d2r_core::ItemBlueprint>, AppError> {
+        Ok(self.session()?.export_blueprints())
+    }
+
+    /// 导出单件物品为蓝图。
+    pub fn export_blueprint(&self, index: usize) -> Result<d2r_core::ItemBlueprint, AppError> {
+        Ok(d2r_core::export_blueprint(self.session()?, index)?)
+    }
+
+    /// 导入一件物品（模板克隆 + 覆盖属性）。
+    pub fn import_blueprint(
+        &mut self,
+        blueprint: &d2r_core::ItemBlueprint,
+        template: usize,
+    ) -> Result<d2r_core::ImportOutcome, AppError> {
+        // 蓝图里的属性也要按位宽校验（指令在 core 内部构造，这里先行拦一道）
+        if let Some(stats) = &blueprint.stats {
+            for s in stats {
+                self.stat_limits
+                    .check(s.stat, s.value)
+                    .map_err(AppError::invalid)?;
+            }
+        }
+        Ok(self.session_mut()?.import_blueprint(blueprint, template)?)
+    }
+
+    /// 把某件物品的属性整体替换。
+    pub fn replace_item_stats(
+        &mut self,
+        index: usize,
+        stats: Vec<(u16, i64, i32)>,
+    ) -> Result<(), AppError> {
+        self.session_mut()?.replace_stats(index, stats)?;
+        Ok(())
+    }
+
     /// 按当前布局设置做越界校验（尺寸来自内置数据包 + mod 覆盖）。
     pub fn validate_bounds(&self) -> Result<Vec<d2r_core::BoundsIssue>, AppError> {
         let session = self.session()?;
@@ -351,10 +394,121 @@ impl Workspace {
         Ok(self.session()?.item_stats())
     }
 
+    /// 属性取值上限表的条数（0 表示没有上限数据）。
+    pub fn stat_limit_count(&self) -> usize {
+        self.stat_limits.len()
+    }
+
+    /// 校验一批物品改动里的属性值是否超位宽（超了返回拒绝原因）。
+    ///
+    /// 单独成函数而不是塞进 apply：这样界面可以在用户输入时就提示，
+    /// 而不是等到点"应用"才报错。
+    pub fn check_item_edits(&self, edits: &[d2r_core::ItemEdit]) -> Result<(), AppError> {
+        if self.stat_limits.is_empty() {
+            return Ok(());
+        }
+        for e in edits {
+            match e {
+                d2r_core::ItemEdit::SetStat { stat, value, .. } => {
+                    self.stat_limits
+                        .check(*stat, *value)
+                        .map_err(AppError::invalid)?;
+                }
+                d2r_core::ItemEdit::ReplaceStats { stats, .. } => {
+                    for (stat, value, _) in stats {
+                        self.stat_limits
+                            .check(*stat, *value)
+                            .map_err(AppError::invalid)?;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
     /// 应用一批物品改动（原子）。
     pub fn apply_item_edits(&mut self, edits: &[ItemEdit]) -> Result<usize, AppError> {
+        // 先按位宽做一次预检（能提前拦住明显超范围的值）
+        self.check_item_edits(edits)?;
         self.session_mut()?.apply_items(edits)?;
+        // 再读回来比对：属性是按位存储的，超范围会被**静默截断**。
+        // 预检无法覆盖带参数/编码的属性（值不是直接存的），所以这里做事实校验：
+        // 写进去的和读出来的不一致就回滚并报错。
+        if let Err(e) = self.verify_item_values(edits) {
+            self.discard_item_edits();
+            return Err(e);
+        }
         Ok(edits.len())
+    }
+
+    /// 校验属性值能否被**按位精确存储**。
+    ///
+    /// 存档里属性是按位存的，读路径是 `(raw - SaveAdd) << ValShift`
+    /// （见 `d2s` 的 `data/mod.rs` 与 `model/item.rs`）。所以：
+    /// - 值必须是 `2^ValShift` 的倍数，否则写盘时会右移丢掉低位；
+    /// - `raw` 必须落在 `Save Bits` 位宽内。
+    ///
+    /// 判定标准是"**写盘再读回**的值等于用户想要的值"——这才是用户真正关心的。
+    fn verify_item_values(&self, edits: &[ItemEdit]) -> Result<(), AppError> {
+        let mut problems: Vec<String> = Vec::new();
+        for e in edits {
+            let (index, wanted): (usize, Vec<(u16, i64)>) = match e {
+                ItemEdit::SetStat { index, stat, value } => (*index, vec![(*stat, *value)]),
+                ItemEdit::ReplaceStats { index, stats } => {
+                    (*index, stats.iter().map(|(s, v, _)| (*s, *v)).collect())
+                }
+                _ => continue,
+            };
+            for (stat, value) in wanted {
+                use d2s::data::ExternalData;
+                // 用库自带的表读该属性的位宽与移位（与存档版本无关的默认表）
+                let Ok(info) = d2s::data::default_data().stat_info(d2s::StatId(stat), 105) else {
+                    continue; // 表里没有：交给 core 的通用校验
+                };
+                let shift = info.val_shift as u32;
+                let unit = 1i64 << shift;
+                // 模拟"写盘 → 读回"：
+                //   写路径 `raw = (value >> shift) + SaveAdd`（SaveAdd 在写盘时加）
+                //   读路径 `value = (raw - SaveAdd) << shift`
+                // 两边的 SaveAdd 相互抵消，所以读回来就是 `(value >> shift) << shift`。
+                let raw = value >> shift;
+                let read_back = raw << shift;
+                let bits_ok = raw >= -(info.save_add as i64)
+                    && raw <= (1i64 << info.save_bits) - 1 - info.save_add as i64;
+                if read_back == value && bits_ok {
+                    continue;
+                }
+                let hint = if shift > 0 && value % unit != 0 {
+                    format!(
+                        "该属性按 2^{shift} = {unit} 的步长存储，请取 {unit} 的倍数（例如 {}）",
+                        value / unit * unit
+                    )
+                } else {
+                    format!(
+                        "位宽为 {} 位（Save Add {}），值超出可精确存储的范围",
+                        info.save_bits, info.save_add
+                    )
+                };
+                problems.push(format!(
+                    "物品 #{index} 属性 ID {stat}：想写 {value}，写盘后会变成 {read_back}。{hint}"
+                ));
+            }
+        }
+        if problems.is_empty() {
+            return Ok(());
+        }
+        Err(AppError::invalid(format!(
+            "属性值校验不通过（{} 处）：{}",
+            problems.len(),
+            problems.join("；")
+        )))
+    }
+    /// 放弃当前挂起的物品修改（回到打开时的状态）。
+    fn discard_item_edits(&mut self) {
+        if let Some(s) = self.session.as_mut() {
+            s.revert_item_edits();
+        }
     }
 
     /// 挂起的物品修改条数。

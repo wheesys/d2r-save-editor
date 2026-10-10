@@ -13,6 +13,8 @@ default = ["bundled-data"]
 bundled-data = []
 
 [dependencies]
+# 用于读取属性编码信息（Save Bits / Save Add / ValShift）做值校验
+d2s = "0.1.0"
 d2r-core = { workspace = true }
 d2r-data = { workspace = true }
 serde = { workspace = true }

@@ -35,6 +35,7 @@ version = "0.1.0"
 dependencies = [
  "d2r-core",
  "d2r-data",
+ "d2s",
  "flate2",
  "serde",
  "serde_json",
@@ -56,6 +57,7 @@ version = "0.1.0"
 dependencies = [
  "d2s",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -28,6 +28,8 @@ fn main() -> ExitCode {
         "edit" => cmd_edit(&args[1..]),
         "view" => cmd_view(&args[1..]),
         "items" => cmd_items(&args[1..]),
+        "export-items" => cmd_export_items(&args[1..]),
+        "import-item" => cmd_import_item(&args[1..]),
         "-h" | "--help" | "help" => {
             usage();
             ExitCode::SUCCESS
@@ -50,6 +52,8 @@ fn usage() {
          d2r edit      <文件.d2s> --set <JSON> [--out <文件>]  编辑并保存（先校验后落盘）\n  \
          d2r view      <文件.d2s> [--json]                  角色/技能/传送点/物品总览（界面同源数据）\n  \
          d2r items     <文件.d2s> [--filter 关键字] [--json] 物品清单/明细\n  \
+         d2r export-items <文件.d2s> [--index N] [--out 文件.json]  导出物品蓝图\n  \
+         d2r import-item  <文件.d2s> --blueprint 文件.json --template N [--dry-run]  导入物品\n  \
          d2r dataset   [--game <游戏目录>]  检查数据集\n  \
          d2r strings   [--dir <目录>]       字符串表抽查\n\n\
          环境变量:\n  \
@@ -1118,6 +1122,149 @@ fn cmd_view(args: &[String]) -> ExitCode {
         );
     }
     ExitCode::SUCCESS
+}
+fn cmd_export_items(args: &[String]) -> ExitCode {
+    let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!("用法: d2r export-items <文件.d2s> [--index N] [--out 文件.json]");
+        return ExitCode::from(2);
+    };
+    let index: Option<usize> = arg_of(args, "--index").and_then(|v| v.parse().ok());
+    let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    if let Err(e) = ws.open(target) {
+        eprintln!("打开失败：{e}");
+        return ExitCode::from(1);
+    }
+
+    let json = match index {
+        Some(i) => match ws.export_blueprint(i) {
+            Ok(b) => serde_json::to_string_pretty(&b).unwrap(),
+            Err(e) => {
+                eprintln!("导出失败：{e}");
+                return ExitCode::from(1);
+            }
+        },
+        None => match ws.export_blueprints() {
+            Ok(list) => serde_json::to_string_pretty(&list).unwrap(),
+            Err(e) => {
+                eprintln!("导出失败：{e}");
+                return ExitCode::from(1);
+            }
+        },
+    };
+
+    match arg_of(args, "--out") {
+        Some(path) => match std::fs::write(&path, &json) {
+            Ok(()) => {
+                println!("已导出到 {path}");
+                ExitCode::SUCCESS
+            }
+            Err(e) => {
+                eprintln!("写文件失败：{e}");
+                ExitCode::from(1)
+            }
+        },
+        None => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+    }
+}
+
+fn cmd_import_item(args: &[String]) -> ExitCode {
+    let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!(
+            "用法: d2r import-item <文件.d2s> --blueprint 文件.json --template N [--dry-run]"
+        );
+        return ExitCode::from(2);
+    };
+    let Some(bp_path) = arg_of(args, "--blueprint") else {
+        eprintln!("需要 --blueprint 指定蓝图 JSON（可用 export-items 导出）");
+        return ExitCode::from(2);
+    };
+    let Some(template) = arg_of(args, "--template").and_then(|v| v.parse::<usize>().ok()) else {
+        eprintln!("需要 --template 指定同存档里的模板物品序号（用 d2r items 查）");
+        return ExitCode::from(2);
+    };
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+
+    let text = match std::fs::read_to_string(&bp_path) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("读蓝图失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+    let blueprint = match d2r_core::parse_blueprint(&text) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("蓝图不合法：{e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    if let Err(e) = ws.open(target) {
+        eprintln!("打开失败：{e}");
+        return ExitCode::from(1);
+    }
+    let before = ws.item_details().map(|v| v.len()).unwrap_or(0);
+
+    let outcome = match ws.import_blueprint(&blueprint, template) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("导入被拒绝：{e}");
+            return ExitCode::from(1);
+        }
+    };
+    println!(
+        "已导入    : 模板 #{template} → 新物品 #{}（覆盖 {} 条属性{}）",
+        outcome.index,
+        outcome.stats_replaced,
+        if outcome.durability_set {
+            "，含耐久"
+        } else {
+            ""
+        }
+    );
+
+    let vr = match ws.verify() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("写前校验失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+    if !vr.ok {
+        eprintln!("写前校验不通过，已放弃：{}", vr.message);
+        return ExitCode::from(1);
+    }
+    println!("写前校验  : 通过（{} 字节）写出并重新解析通过", vr.bytes);
+
+    if dry_run {
+        println!("--dry-run：未落盘（物品数 {before} → {}）", before + 1);
+        return ExitCode::SUCCESS;
+    }
+    match ws.save(None) {
+        Ok(r) => {
+            println!(
+                "已保存    : {}（{} 字节，物品 {} → {}，{}）",
+                r.path.display(),
+                r.bytes,
+                before,
+                before + 1,
+                if r.backed_up {
+                    "已备份原文件"
+                } else {
+                    "未备份"
+                }
+            );
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("保存失败：{e}");
+            ExitCode::from(1)
+        }
+    }
 }
 fn cmd_items(args: &[String]) -> ExitCode {
     let json = args.iter().any(|a| a == "--json");

@@ -198,6 +198,12 @@ impl AppError {
     }
 }
 
+impl AppError {
+    /// 取值不合法（越界、超位宽等）。
+    pub fn invalid(message: impl Into<String>) -> Self {
+        Self::new("invalid", message)
+    }
+}
 impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[{}] {}", self.kind, self.message)

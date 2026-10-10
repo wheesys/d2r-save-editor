@@ -1,9 +1,9 @@
-//! 物品编辑（里程碑 5）：查看明细、改耐久/数量/防御、增删属性、移动、删除。
+//! 物品编辑（里程碑 5）：查看明细、改耐久/数量/防御、增删属性、移动、删除、克隆、导入。
 //!
 //! 设计原则（与里程碑 4 一致）：
 //! - **改动可校验**：写路径仍走 [`crate::edit::EditSession::verify`]，逐字节往返是发布门槛；
 //! - **不写死游戏常量**：属性位宽/上限来自数据集（`ItemStatCost.txt`），
-//!   容器尺寸来自存档自身（见 `d2r-data::placement` 的说明）；
+//!   容器尺寸由用户确认（见 [`crate::layout`]）；
 //! - **失败安全**：越界、超上限、不存在的下标一律拒绝，不"猜着写"。
 
 use d2s::{ItemPosition, Stat, StatId};
@@ -67,7 +67,7 @@ pub enum ItemEdit {
         /// 新耐久。
         value: i32,
     },
-    /// 设置堆叠数量（1..=上限）。
+    /// 设置堆叠数量（1..=511）。
     SetQuantity {
         /// 物品序号。
         index: usize,
@@ -111,6 +111,34 @@ pub enum ItemEdit {
         /// 物品序号。
         index: usize,
     },
+    /// 克隆一件物品并追加到列表末尾（物品导入用：模板克隆）。
+    CloneItem {
+        /// 模板物品序号。
+        template: usize,
+    },
+    /// 整体替换物品的属性列表（物品导入用）。
+    ReplaceStats {
+        /// 物品序号。
+        index: usize,
+        /// 新属性：(属性 ID, 数值, 层)。
+        stats: Vec<(u16, i64, i32)>,
+    },
+}
+
+/// 物品统计（给界面/CLI 汇总）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemStats {
+    /// 物品总数。
+    pub total: usize,
+    /// 各存储页数量（页名 → 数量）。
+    pub by_page: Vec<(String, usize)>,
+    /// 各品质数量（品质名 → 数量）。
+    pub by_quality: Vec<(String, usize)>,
+    /// 已装备数量。
+    pub equipped: usize,
+    /// 带镶嵌物的数量。
+    pub with_sockets: usize,
 }
 
 /// 一件物品超出用户确认的容器尺寸。
@@ -147,22 +175,6 @@ impl std::fmt::Display for BoundsIssue {
             self.container.1
         )
     }
-}
-
-/// 物品统计（给界面/CLI 汇总）。
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ItemStats {
-    /// 物品总数。
-    pub total: usize,
-    /// 各存储页数量（页名 → 数量）。
-    pub by_page: Vec<(String, usize)>,
-    /// 各品质数量（品质名 → 数量）。
-    pub by_quality: Vec<(String, usize)>,
-    /// 已装备数量。
-    pub equipped: usize,
-    /// 带镶嵌物的数量。
-    pub with_sockets: usize,
 }
 
 impl EditSession {
@@ -240,6 +252,73 @@ impl EditSession {
         }
     }
 
+    /// 从存档推断存储布局（读不出来的项会出现在 `unknowns`）。
+    ///
+    /// 只做**下限推断**：坐标跨度只能说明"至少这么大"，不能说明真实尺寸，
+    /// 所以推断结果用于提示用户确认，而不是直接当作真实尺寸使用。
+    pub fn layout_hints(&self) -> crate::layout::LayoutHints {
+        use crate::layout::LayoutHints;
+
+        let mut hints = LayoutHints::default();
+        let mut inv_max: Option<(u32, u32)> = None;
+        let mut cube_max: Option<(u32, u32)> = None;
+        let mut stash_max: Option<(u32, u32)> = None;
+
+        for it in &self.file.save.items {
+            let p = &it.position;
+            let mode = format!("{:?}", p.mode);
+            if !matches!(mode.as_str(), "Stored" | "InBelt") {
+                continue;
+            }
+            let (x, y) = (p.inv_x as u32, p.inv_y as u32);
+            match format!("{:?}", p.store_page).as_str() {
+                "Inventory" => {
+                    let cur = inv_max.get_or_insert((0, 0));
+                    cur.0 = cur.0.max(x);
+                    cur.1 = cur.1.max(y);
+                }
+                "Cube" => {
+                    let cur = cube_max.get_or_insert((0, 0));
+                    cur.0 = cur.0.max(x);
+                    cur.1 = cur.1.max(y);
+                }
+                "Stash" => {
+                    let cur = stash_max.get_or_insert((0, 0));
+                    cur.0 = cur.0.max(x);
+                    cur.1 = cur.1.max(y);
+                }
+                _ => {}
+            }
+        }
+
+        if let Some((x, y)) = inv_max {
+            hints.inventory_max = Some((x, y));
+            // 跨度只是下限：真实尺寸至少是"最大坐标 + 1"
+            hints.inventory_extent = Some((x + 1, y + 1));
+        }
+        if let Some((x, y)) = cube_max {
+            hints.cube_max = Some((x, y));
+        }
+        if let Some((x, y)) = stash_max {
+            hints.stash_max = Some((x, y));
+            hints.stash_extent = Some((x + 1, y + 1));
+        }
+
+        // 佣兵装备段
+        if let Some(merc) = &self.file.save.merc_items {
+            hints.merc_section = true;
+            hints.merc_items = merc.items.len();
+        }
+
+        hints.unknowns = vec![
+            "背包真实格子数（存档只存坐标，不存容器尺寸）".into(),
+            "箱子真实格子数（同上）".into(),
+            "合成箱真实格子数（同上）".into(),
+            "是否佣兵全装备（mod 改动，存档无标记）".into(),
+        ];
+        hints
+    }
+
     /// 按用户确认的布局做**可靠的越界校验**。
     ///
     /// 为什么现在能硬判：`layout` 是用户勾选/填写的实际尺寸（读不出来所以问用户），
@@ -284,72 +363,6 @@ impl EditSession {
         (issues, checked)
     }
 
-    /// 从存档推断存储布局（读不出来的项会出现在 `unknowns`）。
-    ///
-    /// 只做**下限推断**：坐标跨度只能说明"至少这么大"，不能说明真实尺寸，
-    /// 所以推断结果用于提示用户确认，而不是直接当作真实尺寸使用。
-    pub fn layout_hints(&self) -> crate::layout::LayoutHints {
-        use crate::layout::LayoutHints;
-
-        let mut hints = LayoutHints::default();
-        let mut inv_max: Option<(u32, u32)> = None;
-        let mut cube_max: Option<(u32, u32)> = None;
-        let mut stash_max: Option<(u32, u32)> = None;
-
-        for it in &self.file.save.items {
-            let p = &it.position;
-            let mode = format!("{:?}", p.mode);
-            if !matches!(mode.as_str(), "Stored" | "InBelt") {
-                continue;
-            }
-            let (x, y) = (p.inv_x as u32, p.inv_y as u32);
-            match format!("{:?}", p.store_page).as_str() {
-                "Inventory" => {
-                    let cur = inv_max.get_or_insert((0, 0));
-                    cur.0 = cur.0.max(x);
-                    cur.1 = cur.1.max(y);
-                }
-                "Cube" => {
-                    let cur = cube_max.get_or_insert((0, 0));
-                    cur.0 = cur.0.max(x);
-                    cur.1 = cur.1.max(y);
-                }
-                "Stash" => {
-                    let cur = stash_max.get_or_insert((0, 0));
-                    cur.0 = cur.0.max(x);
-                    cur.1 = cur.1.max(y);
-                }
-                _ => {}
-            }
-        }
-
-        if let Some((x, y)) = inv_max {
-            hints.inventory_max = Some((x, y));
-            // 跨度只是下限：真实尺寸至少是"最大坐标 + 1"，再留一行余量
-            hints.inventory_extent = Some((x + 1, y + 1));
-        }
-        if let Some((x, y)) = cube_max {
-            hints.cube_max = Some((x, y));
-        }
-        if let Some((x, y)) = stash_max {
-            hints.stash_max = Some((x, y));
-            hints.stash_extent = Some((x + 1, y + 1));
-        }
-
-        // 佣兵装备段
-        if let Some(merc) = &self.file.save.merc_items {
-            hints.merc_section = true;
-            hints.merc_items = merc.items.len();
-        }
-
-        hints.unknowns = vec![
-            "背包真实格子数（存档只存坐标，不存容器尺寸）".into(),
-            "箱子真实格子数（同上）".into(),
-            "合成箱真实格子数（同上）".into(),
-            "是否佣兵全装备（mod 改动，存档无标记）".into(),
-        ];
-        hints
-    }
     /// 应用一条物品改动。
     pub fn apply_item(&mut self, edit: ItemEdit) -> Result<(), EditError> {
         // 先做所有校验，再改动（避免半途失败留下半成品）
@@ -401,13 +414,12 @@ impl EditSession {
                 }
             }
             ItemEdit::MoveTo { index, col, row } => {
-                let item = self.item_mut(*index)?;
-                // 坐标是 4 位字段（0–15）；越界在容器校验里另行判断
                 if *col > 15 || *row > 15 {
                     return Err(EditError::Invalid(format!(
                         "格子坐标必须在 0–15（收到 {col},{row}）"
                     )));
                 }
+                let item = self.item_mut(*index)?;
                 item.position.inv_x = *col;
                 item.position.inv_y = *row;
             }
@@ -417,9 +429,53 @@ impl EditSession {
                 }
                 self.file.save.items.remove(*index);
             }
+            ItemEdit::CloneItem { template } => {
+                let src = self
+                    .file
+                    .save
+                    .items
+                    .get(*template)
+                    .ok_or_else(|| {
+                        EditError::Invalid(format!(
+                            "模板序号 {template} 越界（共 {} 件）",
+                            self.item_count()
+                        ))
+                    })?
+                    .clone();
+                self.file.save.items.push(src);
+            }
+            ItemEdit::ReplaceStats { index, stats } => {
+                let list: Vec<Stat> = stats
+                    .iter()
+                    .map(|(id, value, layer)| Stat {
+                        id: StatId(*id),
+                        value: *value,
+                        layer: *layer,
+                    })
+                    .collect();
+                self.item_mut(*index)?.stats = list;
+            }
         }
         self.item_edits.push(edit);
         Ok(())
+    }
+
+    /// 撤销全部挂起的物品修改，回到打开时的状态。
+    ///
+    /// 用途：应用层做"写入后读回校验"发现值被截断时回滚。
+    pub fn revert_item_edits(&mut self) {
+        if self.item_edits.is_empty() {
+            return;
+        }
+        // 重新从原始字节加载，最干净
+        let original = self.original.clone();
+        let kind = self.file.kind;
+        if let Ok(file) = crate::SaveFile::from_bytes(kind, original) {
+            let path = self.path.clone();
+            self.file = file;
+            self.file.path = path;
+        }
+        self.item_edits.clear();
     }
 
     /// 批量应用（原子）。
