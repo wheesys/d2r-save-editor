@@ -1,0 +1,6 @@
+{
+  "name": "d2r-save-editor-desktop",
+  "private": true,
+  "version": "0.0.1",
+  "description": "D2R 存档编辑器桌面端（Tauri v2）"
+}

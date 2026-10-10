@@ -60,7 +60,7 @@ fn main() -> ExitCode {
             .count();
         println!("\n最长公共前缀: {prefix} 字节");
         println!("最长公共后缀: {suffix} 字节");
-        let (longer, shorter, label) = if b.len() > a.len() { (&b, &a, "新文件多出") } else { (&a, &b, "原文件多出") };
+        let (longer, _shorter, label) = if b.len() > a.len() { (&b, &a, "新文件多出") } else { (&a, &b, "原文件多出") };
         let ins_start = prefix;
         let ins_end = longer.len() - suffix;
         println!(

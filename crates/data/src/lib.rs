@@ -16,6 +16,7 @@
 pub mod dataset;
 pub mod itemname;
 pub mod placement;
+pub mod skillname;
 pub mod strings;
 pub mod table;
 
@@ -25,6 +26,7 @@ pub use placement::{
     build_size_map, container_spec_from_tables, validate_body_slots, validate_region, ContainerSpec,
     Issue, PlacedItem, RegionReport, Severity, ValidationReport,
 };
+pub use skillname::SkillNamer;
 pub use strings::Strings;
 pub use table::{DataError, Table};
 

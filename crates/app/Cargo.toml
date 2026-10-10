@@ -1,0 +1,14 @@
+[package]
+name = "d2r-app"
+description = "D2R 存档编辑器服务层：CLI 与 Tauri 界面共用（数据 + 编辑 + 校验）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+d2r-core = { workspace = true }
+d2r-data = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

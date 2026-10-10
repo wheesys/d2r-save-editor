@@ -9,6 +9,9 @@ target/
 # Node / 前端
 node_modules/
 dist/
+# 桌面端构建产物（Tauri 的 gen/ 由 tauri-build 生成）
+desktop/src-tauri/gen/
+desktop/src-tauri/target/
 
 # 本地工具与构建中间产物
 .spec-workflow/

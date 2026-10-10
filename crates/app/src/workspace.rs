@@ -1,0 +1,318 @@
+//! 工作区：把"数据集 + 字符串表 + 存档 + 编辑会话"绑在一起，供界面/CLI 调用。
+
+use std::path::{Path, PathBuf};
+
+use d2r_core::{Edit, EditSession, SaveKind};
+use d2r_data::{ItemNamer, SkillNamer, Strings, TableStore};
+
+use crate::dto::{
+    AppError, CharacterDto, DatasetInfo, EditRequest, ItemDto, SaveInfo, SaveResult, SkillDto,
+    VerifyResult, WaypointsDto,
+};
+
+/// 保存结果（内部形态，含是否备份）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveOutcome {
+    /// 写入路径。
+    pub path: PathBuf,
+    /// 字节数。
+    pub bytes: usize,
+    /// 是否创建了备份。
+    pub backed_up: bool,
+    /// 应用了多少条修改。
+    pub edits: usize,
+}
+
+/// 编辑器工作区。
+pub struct Workspace {
+    /// 游戏目录（用于定位数据集）。
+    pub game_dir: PathBuf,
+    /// 数据集根目录。
+    dataset_root: Option<PathBuf>,
+    /// excel 表集合。
+    tables: TableStore,
+    /// 字符串表。
+    strings: Strings,
+    /// 显示语言。
+    pub lang: String,
+    /// 当前编辑会话。
+    session: Option<EditSession>,
+}
+
+/// 默认游戏目录。
+pub fn default_game_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("D2R_GAME_DIR") {
+        return PathBuf::from(p);
+    }
+    PathBuf::from(r"D:\Games\d2r92777\Diablo II Resurrected Infernal Edition")
+}
+
+/// 在仓库/当前目录附近找官方字符串表（`samples/game-data/lng/strings`）。
+pub fn find_strings_dir() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("D2R_STRINGS_DIR") {
+        let p = PathBuf::from(p);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        let cand = dir.join("samples").join("game-data").join("lng").join("strings");
+        if cand.is_dir() {
+            return Some(cand);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+impl Workspace {
+    /// 新建工作区并挂载数据集（数据集缺失不报错，只是名字显示会退化为代码）。
+    pub fn new(game_dir: impl Into<PathBuf>) -> Self {
+        let game_dir = game_dir.into();
+        let mut tables = TableStore::empty();
+        let mut dataset_root = None;
+        if let Some(root) = d2r_data::find_loader_dataset(&game_dir) {
+            tables = TableStore::new(root.join("data").join("global").join("excel"));
+            dataset_root = Some(root);
+        }
+        let strings = find_strings_dir()
+            .and_then(|d| Strings::from_dir(d).ok())
+            .unwrap_or_default();
+        Self { game_dir, dataset_root, tables, strings, lang: "zhCN".to_string(), session: None }
+    }
+
+    /// 挂载官方字符串表目录（界面里可让用户选）。
+    pub fn set_strings_dir(&mut self, dir: impl AsRef<Path>) -> Result<usize, AppError> {
+        let s = Strings::from_dir(dir).map_err(|e| AppError::new("strings", e.to_string()))?;
+        let n = s.len();
+        self.strings.merge(s);
+        Ok(n)
+    }
+
+    /// 数据集信息。
+    pub fn dataset_info(&self) -> DatasetInfo {
+        DatasetInfo {
+            root: self
+                .dataset_root
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "(未找到数据集)".into()),
+            tables: self.tables.available().len(),
+            strings: self.strings.len(),
+            languages: self.strings.languages().to_vec(),
+        }
+    }
+
+    /// 打开存档。
+    pub fn open(&mut self, path: impl AsRef<Path>) -> Result<SaveInfo, AppError> {
+        let path = path.as_ref().to_path_buf();
+        let session = EditSession::open(&path)?;
+        let info = SaveInfo {
+            path: path.display().to_string(),
+            kind: match session.file.kind {
+                SaveKind::Character => "character".into(),
+                SaveKind::Stash => "stash".into(),
+            },
+            version: match &session.file.stash {
+                Some(s) => s.save_version,
+                None => session.file.header.version,
+            },
+            size: session.file.original.len(),
+            checksum: session.file.stash.as_ref().map(|_| 0).or(Some(session.file.header.checksum)),
+            roundtrip_identical: session.file.check_roundtrip().identical,
+        };
+        self.session = Some(session);
+        Ok(info)
+    }
+
+    /// 会话是否存在。
+    pub fn is_open(&self) -> bool {
+        self.session.is_some()
+    }
+
+    /// 是否有未保存的修改。
+    pub fn is_dirty(&self) -> bool {
+        self.session.as_ref().map(|s| s.is_dirty()).unwrap_or(false)
+    }
+
+    fn session(&self) -> Result<&EditSession, AppError> {
+        self.session.as_ref().ok_or_else(|| AppError::new("state", "还没有打开存档"))
+    }
+
+    fn session_mut(&mut self) -> Result<&mut EditSession, AppError> {
+        self.session.as_mut().ok_or_else(|| AppError::new("state", "还没有打开存档"))
+    }
+
+    /// 角色信息。
+    pub fn character(&self) -> Result<CharacterDto, AppError> {
+        let v = self.session()?.character();
+        Ok(CharacterDto {
+            name: v.name,
+            class: v.class,
+            level: v.level,
+            strength: v.strength,
+            dexterity: v.dexterity,
+            vitality: v.vitality,
+            energy: v.energy,
+            stat_points: v.stat_points,
+            skill_points: v.skill_points,
+            life: v.life,
+            max_life: v.max_life,
+            mana: v.mana,
+            max_mana: v.max_mana,
+            stamina: v.stamina,
+            experience: v.experience,
+            gold: v.gold,
+            stash_gold: v.stash_gold,
+        })
+    }
+
+    /// 技能列表（含名字）。
+    pub fn skills(&mut self) -> Result<Vec<SkillDto>, AppError> {
+        // 先把 (槽位, 技能ID, 等级) 取出来，避免同时借用 session 与 tables
+        let rows: Vec<(usize, Option<u16>, u8)> = {
+            let session = self.session()?;
+            let skills = &session.file.save.skills;
+            (0..skills.levels.len())
+                .map(|i| (i, skills.skill_id(i), skills.levels[i]))
+                .collect()
+        };
+        let namer = SkillNamer::new(&mut self.tables, &self.strings, self.lang.clone());
+        Ok(rows
+            .into_iter()
+            .map(|(index, skill_id, level)| SkillDto {
+                index,
+                skill_id,
+                name: skill_id.and_then(|i| namer.name_by_id(i)),
+                level,
+            })
+            .collect())
+    }
+
+    /// 传送点状态。
+    pub fn waypoints(&self) -> Result<Vec<WaypointsDto>, AppError> {
+        let raw = self.session()?.waypoints();
+        const NAMES: [&str; 3] = ["普通", "噩梦", "地狱"];
+        Ok(raw
+            .into_iter()
+            .enumerate()
+            .map(|(i, active)| WaypointsDto {
+                difficulty: NAMES.get(i).copied().unwrap_or("?").to_string(),
+                active,
+            })
+            .collect())
+    }
+
+    /// 物品列表（含中文名）。
+    pub fn items(&mut self) -> Result<Vec<ItemDto>, AppError> {
+        // 先把需要的字段取出来，避免同时借用 session 与 tables
+        let raw: Vec<(String, String, Option<u16>, u8, String, String, String, u8, u8, usize)> = {
+            let session = self.session()?;
+            session
+                .file
+                .save
+                .items
+                .iter()
+                .map(|it| {
+                    let p = &it.position;
+                    (
+                        it.code.to_string(),
+                        format!("{:?}", it.quality),
+                        it.quality_data.as_ref().and_then(|q| q.file_index()),
+                        it.level,
+                        format!("{:?}", p.mode),
+                        format!("{:?}", p.body_location),
+                        format!("{:?}", p.store_page),
+                        p.inv_x,
+                        p.inv_y,
+                        it.stats.len(),
+                    )
+                })
+                .collect()
+        };
+
+        let mut namer = ItemNamer::new(&self.strings, &mut self.tables, self.lang.clone());
+        Ok(raw
+            .into_iter()
+            .map(|(code, quality, idx, level, mode, body_location, store_page, inv_x, inv_y, stats_count)| {
+                let n = namer.resolve(&code, &quality, idx);
+                ItemDto {
+                    code,
+                    name: n.display(),
+                    name_resolved: n.resolved,
+                    quality,
+                    level,
+                    mode,
+                    body_location,
+                    store_page,
+                    inv_x,
+                    inv_y,
+                    stats_count,
+                }
+            })
+            .collect())
+    }
+
+    /// 应用修改（原子：任一条失败全部回滚）。
+    pub fn apply(&mut self, edits: &[EditRequest]) -> Result<usize, AppError> {
+        let session = self.session_mut()?;
+        session.apply_all(edits)?;
+        Ok(edits.len())
+    }
+
+    /// 保存前自检（不落盘）。
+    pub fn verify(&self) -> Result<VerifyResult, AppError> {
+        let session = self.session()?;
+        match session.verify() {
+            Ok((bytes, ok)) => Ok(VerifyResult {
+                ok,
+                bytes: bytes.len(),
+                message: if ok { "写出并重新解析通过".into() } else { "往返不一致".into() },
+            }),
+            Err(e) => Ok(VerifyResult { ok: false, bytes: 0, message: e.to_string() }),
+        }
+    }
+
+    /// 保存（校验通过才落盘，目标已存在时先备份）。
+    pub fn save(&self, dest: Option<PathBuf>) -> Result<SaveOutcome, AppError> {
+        let session = self.session()?;
+        let dest = match dest {
+            Some(d) => d,
+            None => session.path.clone().ok_or_else(|| AppError::new("state", "没有源路径"))?,
+        };
+        let backed_up = dest.exists();
+        let edits = session.applied.len();
+        let written = session.save_as(&dest)?;
+        let bytes = std::fs::metadata(&written).map(|m| m.len() as usize).unwrap_or(0);
+        Ok(SaveOutcome { path: written, bytes, backed_up, edits })
+    }
+
+    /// 把保存结果转成 DTO。
+    pub fn save_dto(&self, dest: Option<PathBuf>) -> Result<SaveResult, AppError> {
+        let o = self.save(dest)?;
+        Ok(SaveResult {
+            path: o.path.display().to_string(),
+            bytes: o.bytes,
+            backed_up: o.backed_up,
+            edits: o.edits,
+        })
+    }
+
+    /// 当前挂起的修改条数。
+    pub fn pending_edits(&self) -> usize {
+        self.session.as_ref().map(|s| s.applied.len()).unwrap_or(0)
+    }
+
+    /// 已应用的修改明细（供界面展示/撤销提示）。
+    pub fn applied_edits(&self) -> Vec<Edit> {
+        self.session.as_ref().map(|s| s.applied.clone()).unwrap_or_default()
+    }
+
+    /// 重新加载（丢弃未保存修改）。
+    pub fn reload(&mut self) -> Result<SaveInfo, AppError> {
+        let path = self.session()?.path.clone().ok_or_else(|| AppError::new("state", "没有源路径"))?;
+        self.open(path)
+    }
+}

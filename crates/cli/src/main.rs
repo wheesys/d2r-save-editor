@@ -25,6 +25,8 @@ fn main() -> ExitCode {
         "dataset" => cmd_dataset(&args[1..]),
         "strings" => cmd_strings(&args[1..]),
         "validate" => cmd_validate(&args[1..]),
+        "edit" => cmd_edit(&args[1..]),
+        "view" => cmd_view(&args[1..]),
         "-h" | "--help" | "help" => {
             usage();
             ExitCode::SUCCESS
@@ -44,6 +46,8 @@ fn usage() {
          d2r roundtrip [目录或文件...]      往返一致性校验（默认 samples/saves）\n  \
          d2r inspect   <文件.d2s|.d2i>      打印存档信息（--json 输出 JSON）\n  \
          d2r validate  <文件.d2s>           容器与物品摆放校验（越界/重叠/未知物品）\n  \
+         d2r edit      <文件.d2s> --set <JSON> [--out <文件>]  编辑并保存（先校验后落盘）\n  \
+         d2r view      <文件.d2s> [--json]                  角色/技能/传送点/物品总览（界面同源数据）\n  \
          d2r dataset   [--game <游戏目录>]  检查数据集\n  \
          d2r strings   [--dir <目录>]       字符串表抽查\n\n\
          环境变量:\n  \
@@ -619,6 +623,142 @@ fn cmd_validate(args: &[String]) -> ExitCode {
 
     println!("\n合计确定问题: {total}，提示: {warns}");
     if total == 0 { ExitCode::SUCCESS } else { ExitCode::from(1) }
+}
+fn cmd_edit(args: &[String]) -> ExitCode {
+    let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!("用法: d2r edit <文件.d2s> --set '<JSON 数组>' [--out <文件>] [--dry-run]");
+        eprintln!("示例: d2r edit a.d2s --set '[{{\"kind\":\"setLevel\",\"level\":50}}]'");
+        return ExitCode::from(2);
+    };
+    let Some(json) = arg_of(args, "--set") else {
+        eprintln!("缺少 --set <JSON>");
+        return ExitCode::from(2);
+    };
+    let edits: Vec<d2r_app::EditRequest> = match serde_json::from_str(&json) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("--set 不是合法的修改数组：{e}");
+            return ExitCode::from(2);
+        }
+    };
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+    let out = arg_of(args, "--out").map(PathBuf::from);
+
+    let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    if let Err(e) = ws.open(target) {
+        eprintln!("打开失败：{e}");
+        return ExitCode::from(1);
+    }
+    println!("存档      : {target}");
+    let before = match ws.character() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("读取角色失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+    println!("修改前    : Lv{} 力量{} 敏捷{} 体力{} 精力{} 金币{}", before.level, before.strength, before.dexterity, before.vitality, before.energy, before.gold);
+
+    if let Err(e) = ws.apply(&edits) {
+        eprintln!("修改被拒绝：{e}");
+        return ExitCode::from(1);
+    }
+    let after = match ws.character() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("读取角色失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+    println!("修改后    : Lv{} 力量{} 敏捷{} 体力{} 精力{} 金币{}", after.level, after.strength, after.dexterity, after.vitality, after.energy, after.gold);
+
+    match ws.verify() {
+        Ok(v) => println!("写前校验  : {}（{} 字节）{}", if v.ok { "通过" } else { "未通过" }, v.bytes, v.message),
+        Err(e) => println!("写前校验  : 失败 {e}"),
+    }
+
+    if dry_run {
+        println!("--dry-run：未落盘，共 {} 条修改", ws.pending_edits());
+        return ExitCode::SUCCESS;
+    }
+    match ws.save_dto(out) {
+        Ok(r) => {
+            println!("已保存    : {}（{} 字节，{} 条修改{}）", r.path, r.bytes, r.edits, if r.backed_up { "，已备份原文件" } else { "" });
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("保存失败：{e}");
+            ExitCode::from(1)
+        }
+    }
+}
+fn cmd_view(args: &[String]) -> ExitCode {
+    let json = args.iter().any(|a| a == "--json");
+    let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!("用法: d2r view <文件.d2s> [--json]");
+        return ExitCode::from(2);
+    };
+    let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    let info = match ws.open(target) {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("打开失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+    let char = match ws.character() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("读取角色失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+    let skills = ws.skills().unwrap_or_default();
+    let waypoints = ws.waypoints().unwrap_or_default();
+    let items = ws.items().unwrap_or_default();
+
+    if json {
+        let out = serde_json::json!({
+            "dataset": ws.dataset_info(),
+            "info": info,
+            "character": char,
+            "skills": skills,
+            "waypoints": waypoints,
+            "items": items,
+        });
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        return ExitCode::SUCCESS;
+    }
+
+    println!("存档      : {}", info.path);
+    println!("版本      : {}｜{} 字节｜往返一致 {}", info.version, info.size, if info.roundtrip_identical { "是" } else { "否" });
+    println!("数据集    : {} 张表｜字符串 {} 条", ws.dataset_info().tables, ws.dataset_info().strings);
+    println!("角色      : {} {} Lv{}", char.name, char.class, char.level);
+    println!("属性      : 力量{} 敏捷{} 体力{} 精力{}（剩余点 {}）", char.strength, char.dexterity, char.vitality, char.energy, char.stat_points);
+    println!("资源      : 生命{}/{} 法力{}/{} 体力{}｜经验{}｜金币{}+箱{}",
+        char.life, char.max_life, char.mana, char.max_mana, char.stamina, char.experience, char.gold, char.stash_gold);
+
+    let learned: Vec<_> = skills.iter().filter(|s| s.level > 0).collect();
+    println!("\n技能      : {} 个已加点 / 共 {} 槽位", learned.len(), skills.len());
+    for s in learned.iter().take(30) {
+        println!("  {:<16} Lv{}（槽位 {}，ID {:?}）", s.name.clone().unwrap_or_else(|| "未命名".into()), s.level, s.index, s.skill_id);
+    }
+
+    println!("\n传送点");
+    for w in &waypoints {
+        let on: Vec<String> = w.active.iter().enumerate().filter(|(_, a)| **a).map(|(i, _)| i.to_string()).collect();
+        println!("  {:<4} 开通 {}/{}：{}", w.difficulty, on.len(), w.active.len(), on.join(","));
+    }
+
+    println!("\n物品      : {} 件", items.len());
+    let mut by_page: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for it in &items {
+        *by_page.entry(it.store_page.as_str()).or_default() += 1;
+    }
+    for (page, n) in by_page {
+        println!("  {page:<12} {n} 件");
+    }
+    ExitCode::SUCCESS
 }
 fn find_ci(dir: &Path, stem: &str) -> Option<PathBuf> {    let wanted = format!("{stem}.txt");
     std::fs::read_dir(dir)

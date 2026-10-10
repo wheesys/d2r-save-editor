@@ -3,8 +3,12 @@ resolver = "2"
 members = [
     "crates/core",
     "crates/data",
+    "crates/app",
     "crates/cli",
 ]
+# 桌面端单独构建（依赖 Tauri，纳入 workspace 会拖慢核心 crate 的构建）：
+#   cd desktop/src-tauri && cargo build
+exclude = ["desktop/src-tauri"]
 
 [workspace.package]
 version = "0.0.1"
@@ -16,6 +20,7 @@ authors = ["wheesys"]
 [workspace.dependencies]
 d2r-core = { path = "crates/core" }
 d2r-data = { path = "crates/data" }
+d2r-app = { path = "crates/app" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

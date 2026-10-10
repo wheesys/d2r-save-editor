@@ -1,0 +1,30 @@
+[package]
+name = "d2r-desktop"
+description = "D2R 存档编辑器桌面端（Tauri v2）"
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+authors = ["wheesys"]
+
+# 说明：桌面端被排除在根 workspace 之外（避免 Tauri 依赖拖慢核心 crate 构建），
+# 所以这里不写 version.workspace 之类的继承，依赖也用相对路径。
+[lib]
+name = "d2r_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+d2r-app = { path = "../../crates/app" }
+d2r-core = { path = "../../crates/core" }
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+strip = true

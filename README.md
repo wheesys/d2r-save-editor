@@ -8,57 +8,69 @@
 
 ```text
 crates/
-├── core/   d2r-core   存档读写、头部/版本识别、往返一致性校验
-├── data/   d2r-data   数据集加载（excel 表、字符串表、mod 描述），数据驱动不写死常量
-└── cli/    d2r        命令行工具：roundtrip / inspect / dataset
-samples/               本地样本（存档、旁车文件、导出的游戏数据；已 gitignore）
-.tools/                开发辅助脚本（CASC 提取器源码、UI 驱动脚本等）
-docs/                  调研与资料清单
+├── core/   d2r-core   存档读写、头部/版本识别、往返校验、编辑会话
+├── data/   d2r-data   数据集加载（excel 表、字符串表、物品/技能名、摆放校验）
+├── app/    d2r-app    服务层：数据集 + 字符串表 + 编辑会话（CLI 与界面共用）
+└── cli/    d2r        命令行工具
+desktop/  Tauri v2 桌面端（src-tauri = Rust 后端，dist = 前端构建产物）
+web/      前端源码（Vite + TypeScript，无框架）
+samples/  本地样本（存档、旁车文件、导出的游戏数据；已 gitignore）
+.tools/   开发辅助脚本（CASC 提取器源码、UI 驱动脚本等）
+docs/     调研与资料清单
 ```
 
 ## 开发
 
 ```powershell
-# 构建 + 测试
+# 核心（工作区）
 cargo build
 cargo test --workspace
 
-# 往返一致性校验（写路径的门槛：读入 → 原样写出 → 逐字节比对）
-cargo run -p d2r-cli -- roundtrip
+# 命令行
+cargo run -p d2r-cli -- roundtrip                       # 往返一致性（写路径门槛）
+cargo run -p d2r-cli -- inspect <存档> [--json]          # 头部/角色/物品（中文名）
+cargo run -p d2r-cli -- view   <存档> [--json]           # 角色+技能+传送点+物品总览
+cargo run -p d2r-cli -- edit   <存档> --set '<JSON>'     # 编辑并保存（先校验后落盘）
+cargo run -p d2r-cli -- validate <文件.d2s>              # 容器与摆放校验
+cargo run -p d2r-cli -- dataset                          # 数据集与字符串表
+cargo run -p d2r-cli -- strings [rvl amu]                # 字符串表抽查
+cargo run -p d2r-data --bin compare-dirs                 # 官方表 vs loader base vs merged
+cargo run -p d2r-core --bin rewrite-save -- <原> <新>     # 读入再写出（配合 cmp-bytes）
+cargo run -p d2r-core --bin cmp-bytes -- <原> <新>        # 字节级差异定位
 
-# 查看存档内容（--json 供界面调用）
-cargo run -p d2r-cli -- inspect "samples/saves/d2r-105/杜仲.d2s" --json
-
-# 检查数据集：表数量、与原版基准的差异表、字符串表
-cargo run -p d2r-cli -- dataset
+# 桌面端（独立于工作区，避免 Tauri 依赖拖慢核心 crate 构建）
+cd web; npm install; npm run build      # 前端 → desktop/dist
+cd desktop/src-tauri; cargo build       # 后端 + 壳（产物 target/debug/d2r-desktop.exe）
 ```
 
-环境变量：`D2R_GAME_DIR`（游戏目录）、`D2R_SAMPLES_DIR`（样本目录）。
+编辑示例：
+
+```powershell
+d2r edit 角色.d2s --set '[{"kind":"setLevel","level":90},
+                          {"kind":"setStat","stat":0,"value":300},
+                          {"kind":"setSkill","index":0,"level":20},
+                          {"kind":"unlockWaypoints","difficulty":0}]' --dry-run
+```
+
+保存前会自动"写出 → 重新解析 → 比对角色信息与尾随数据"，通过才落盘，并给原文件留 `.bak` 备份。
+
+环境变量：`D2R_GAME_DIR`（游戏目录）、`D2R_SAMPLES_DIR`（样本目录）、`D2R_STRINGS_DIR`（字符串表目录）。
 
 ## 当前进度
 
 | 里程碑 | 状态 |
 |---|---|
-| 1 数据集加载器 | 🟢 excel 表（loader 展开的 88 张 + 官方 CASC 导出 91 张）、字符串表（24,179 条 / 13 种语言）、mod 描述；官方表与本机数据已交叉比对 |
-| 2 `.d2s` 读入→写出逐字节一致 | 🟢 8 个样本中 **7 个逐字节一致**（含 `.d2i`）；剩 1 个已知条目段编码差异，见 `docs/next-steps-materials.md` §3.10 |
-| 3 容器与物品摆放校验 | 🟢 区域级重叠 / 装备位重复 / 未知物品代码；发现"不能用原版表判越界"与"合成箱局部坐标"两条坑（§3.9） |
-| 4 属性/技能/任务/传送点编辑 | ⬜ 待开始 |
+| 1 数据集加载器 | 🟢 excel 表（loader 展开 88 张 + 官方 CASC 导出 91 张）、字符串表（24,179 条 / 13 种语言）、物品名与技能名解析 |
+| 2 `.d2s` 读入→写出逐字节一致 | 🟢 8 个样本中 **7 个逐字节一致**（含 `.d2i`）；剩 1 个已知条目段编码差异（见 `docs/next-steps-materials.md` §3.10） |
+| 3 容器与物品摆放校验 | 🟢 区域级重叠 / 装备位重复 / 未知物品代码；记录了"不能用原版表判越界"与"合成箱局部坐标"两条坑（§3.9） |
+| 4 属性/技能/任务/传送点编辑 | 🟢 等级、8 项属性、技能等级、三难度传送点；带校验与备份的保存 |
 | 5 物品编辑与导入 | ⬜ 待开始 |
 | 6 佣兵装备 | ⬜ 待开始 |
-| 7 Tauri 界面整合 | ⬜ 待开始 |
+| 7 Tauri 界面整合 | 🟢 桌面端可运行：打开存档 → 显示角色/技能/传送点/物品 → 编辑 → 校验 → 保存（界面中文） |
 
-已能用的命令：
-
-```powershell
-cargo run -p d2r-cli -- roundtrip                       # 往返一致性（写路径门槛）
-cargo run -p d2r-cli -- inspect <存档> [--json]          # 头部/角色/物品（中文名）
-cargo run -p d2r-cli -- validate <文件.d2s>              # 容器与摆放校验
-cargo run -p d2r-cli -- dataset                          # 数据集与字符串表
-cargo run -p d2r-cli -- strings [rvl amu]                # 字符串表抽查
-cargo run -p d2r-data --bin compare-dirs                 # 官方表 vs loader base vs merged
-cargo run -p d2r-core --bin rewrite-save -- <原> <新>     # 读入再写出（配合 cmp-bytes 定位差异）
-cargo run -p d2r-core --bin cmp-bytes -- <原> <新>        # 字节级差异定位
-```
+> 桌面端的已知环境适配：Tauri 默认把 WebView2 数据目录设为 `%LOCALAPPDATA%\<identifier>`，
+> 某些受限环境下该目录创建会失败（`os error 5`）。因此窗口改为在代码里创建并显式指定
+> 数据目录（exe 同级 `webview2-data`，不可写则退回系统临时目录），见 `desktop/src-tauri/src/lib.rs`。
 
 ## 功能目标
 

@@ -15,10 +15,12 @@
 //! - **未知数据透传**：读到时原样保留，写回时不丢弃。
 
 pub mod d2i;
+pub mod edit;
 pub mod header;
 pub mod save;
 
 pub use d2i::{D2iError, SharedStash};
+pub use edit::{CharacterView, Edit, EditError, EditSession, SkillView};
 pub use header::{HeaderError, SaveHeader, SaveVersion, MAGIC};
 pub use save::{RoundTrip, SaveError, SaveFile, SaveKind};
 

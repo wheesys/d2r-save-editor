@@ -1,0 +1,21 @@
+{
+  "name": "d2r-save-editor-web",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "description": "D2R 存档编辑器前端（Vite + TypeScript，无框架）",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2"
+  }
+}

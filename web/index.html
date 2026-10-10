@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>D2R 存档修改器</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>D2R 存档修改器</h1>
+      <div class="toolbar">
+        <button id="btn-open">打开存档…</button>
+        <button id="btn-save" disabled>保存</button>
+        <button id="btn-reload" disabled>放弃修改</button>
+        <span id="dirty" class="badge hidden">有未保存修改</span>
+      </div>
+      <div id="dataset" class="muted"></div>
+    </header>
+
+    <main>
+      <section id="overview" class="card hidden">
+        <h2>存档</h2>
+        <table id="save-info"></table>
+      </section>
+
+      <section id="char-section" class="card hidden">
+        <h2>角色</h2>
+        <div class="grid">
+          <label>等级 <input id="f-level" type="number" min="1" max="99" /></label>
+          <label>力量 <input id="f-strength" type="number" min="0" /></label>
+          <label>敏捷 <input id="f-dexterity" type="number" min="0" /></label>
+          <label>体力 <input id="f-vitality" type="number" min="0" /></label>
+          <label>精力 <input id="f-energy" type="number" min="0" /></label>
+          <label>属性点 <input id="f-stat-points" type="number" min="0" /></label>
+          <label>技能点 <input id="f-skill-points" type="number" min="0" /></label>
+          <label>身上金币 <input id="f-gold" type="number" min="0" /></label>
+          <label>储物箱金币 <input id="f-stash-gold" type="number" min="0" /></label>
+        </div>
+        <p class="muted" id="char-readonly"></p>
+        <div class="actions">
+          <button id="btn-apply-char">应用角色修改</button>
+          <button id="btn-waypoints-all">解锁全部难度传送点</button>
+        </div>
+      </section>
+
+      <section id="skills-section" class="card hidden">
+        <h2>技能</h2>
+        <p class="muted">只列出已加点的技能；「显示全部」可展开该职业全部技能槽位。</p>
+        <label class="inline"><input type="checkbox" id="show-all-skills" /> 显示全部</label>
+        <div id="skills" class="skills"></div>
+        <div class="actions"><button id="btn-apply-skills">应用技能修改</button></div>
+      </section>
+
+      <section id="waypoints-section" class="card hidden">
+        <h2>传送点</h2>
+        <div id="waypoints" class="waypoints"></div>
+      </section>
+
+      <section id="items-section" class="card hidden">
+        <h2>物品</h2>
+        <div id="items-summary" class="muted"></div>
+        <div class="table-wrap"><table id="items"></table></div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
