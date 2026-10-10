@@ -35,6 +35,22 @@ pub struct StatName {
     pub step: i64,
     /// 是否带参数位（`Save Param Bits > 0`）。
     pub has_param_bits: bool,
+    /// 游戏会不会为这个属性生成描述串（`descfunc != 0` 且描述键能在文本表里找到）。
+    ///
+    /// 这是"**值不值得让用户改**"最可靠的一条判据：游戏不为它生成描述的属性，
+    /// 基本是引擎内部记账字段，改了不会在物品说明里体现，也不保证影响玩法。
+    pub user_visible: bool,
+    /// 描述串用的文字（洗掉格式占位符后的模板，保留下来做参考）。
+    pub desc_template: Option<String>,
+}
+
+impl StatName {
+    /// 是否适合作为"可编辑属性"展示给用户。
+    ///
+    /// 条件：游戏会为它生成描述（`user_visible`），并且描述串确实解析出了名字。
+    pub fn is_editable(&self) -> bool {
+        self.user_visible && self.resolved
+    }
 }
 
 /// 属性名解析器。
@@ -58,10 +74,12 @@ impl StatNamer {
             // 没有描述字符串的属性（descfunc == 0）直接用内部名
             let descfunc = table.int(r, "descfunc").unwrap_or(0);
             let key = table.cell_nonempty(r, "descstrpos").unwrap_or("");
+            let mut template = None;
             let (display, resolved) = if descfunc != 0 && !key.is_empty() {
                 // text() 按首选语言（zhCN）自动回退
                 match strings.text(key) {
                     Some(text) if !text.is_empty() => {
+                        template = Some(text.to_string());
                         let label = clean_label(text);
                         if label.is_empty() {
                             (internal.clone(), false)
@@ -75,6 +93,8 @@ impl StatNamer {
                 (internal.clone(), false)
             };
             let shift = table.int(r, "ValShift").unwrap_or(0).clamp(0, 31) as u32;
+            // 游戏会为它生成描述，且描述串确实解析出了名字 → 值得让用户改
+            let user_visible = descfunc != 0 && template.is_some();
             by_id.insert(
                 id as u16,
                 StatName {
@@ -84,6 +104,8 @@ impl StatNamer {
                     resolved,
                     step: 1i64 << shift,
                     has_param_bits: table.int(r, "Save Param Bits").unwrap_or(0) > 0,
+                    user_visible,
+                    desc_template: template,
                 },
             );
         }
@@ -136,6 +158,24 @@ impl StatNamer {
     /// 只要解析出显示名的属性（界面下拉优先用这个）。
     pub fn named(&self) -> Vec<&StatName> {
         self.by_id.values().filter(|s| s.resolved).collect()
+    }
+
+    /// **适合让用户编辑**的属性：游戏会为它生成描述，且描述串解析出了名字。
+    ///
+    /// 判据来自数据表本身：`descfunc != 0` 且 `descstrpos` 能在文本表里找到。
+    /// 实测那 148 个 `descfunc == 0` 的属性**都不带描述串**，所以它们本来就没有
+    /// 解析出名字、也不会出现在 [`Self::named`] 里；这个方法把"可编辑"的判据
+    /// 写成显式条件，避免以后靠"有没有名字"这种间接推断。
+    ///
+    /// 将来若某个无描述属性被赋予名字（例如有人补了文本表），它**不会**进入这里，
+    /// 因为游戏不会为它生成物品说明、改了也不会体现出来。
+    pub fn editable(&self) -> Vec<&StatName> {
+        self.by_id.values().filter(|s| s.is_editable()).collect()
+    }
+
+    /// 可编辑属性的数量。
+    pub fn editable_count(&self) -> usize {
+        self.by_id.values().filter(|s| s.is_editable()).count()
     }
 }
 

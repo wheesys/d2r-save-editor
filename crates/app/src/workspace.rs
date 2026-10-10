@@ -39,6 +39,10 @@ pub struct StatCatalogEntry {
     pub step: i64,
     /// 是否带参数位。
     pub has_param_bits: bool,
+    /// 游戏是否会为它生成描述（`false` = 引擎内部字段，改了可能不生效）。
+    pub user_visible: bool,
+    /// 描述串模板（洗格式串前的原文，仅供参考）。
+    pub desc_template: Option<String>,
 }
 
 /// 编辑器工作区。
@@ -359,6 +363,8 @@ impl Workspace {
                     max_durability: d.max_durability,
                     quantity: d.quantity,
                     socket_count: d.socket_count,
+                    socketed_count: d.socketed_count,
+                    socketed_flag: d.socketed_flag,
                     width: w,
                     height: h,
                 }
@@ -424,11 +430,16 @@ impl Workspace {
 
     /// 属性目录：界面做"添加属性"下拉用。
     ///
-    /// 只返回**解析出显示名**的属性（解析不出的对用户没意义）；
-    /// `step` 是该属性值的最小小步长（按位存储 + 移位决定）。
-    pub fn stat_catalog(&self) -> Vec<StatCatalogEntry> {
-        self.stat_namer
-            .named()
+    /// **默认只返回游戏会显示、且解析出名字的属性**（`all = false`）；
+    /// 那批引擎内部记账字段（改了不生效）默认不列。
+    /// 传 `all = true` 可以看到全部（界面应标注"可能无效"）。
+    pub fn stat_catalog(&self, all: bool) -> Vec<StatCatalogEntry> {
+        let source = if all {
+            self.stat_namer.named()
+        } else {
+            self.stat_namer.editable()
+        };
+        source
             .into_iter()
             .map(|s| StatCatalogEntry {
                 id: s.id,
@@ -436,6 +447,8 @@ impl Workspace {
                 internal: s.internal.clone(),
                 step: s.step,
                 has_param_bits: s.has_param_bits,
+                user_visible: s.user_visible,
+                desc_template: s.desc_template.clone(),
             })
             .collect()
     }

@@ -1129,7 +1129,8 @@ fn cmd_stats(args: &[String]) -> ExitCode {
     let json = args.iter().any(|a| a == "--json");
     let filter = arg_of(args, "--filter").map(|f| f.to_lowercase());
     let ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
-    let catalog = ws.stat_catalog();
+    let all = args.iter().any(|a| a == "--all");
+    let catalog = ws.stat_catalog(all);
     let items: Vec<&d2r_app::StatCatalogEntry> = match &filter {
         Some(f) => catalog
             .iter()
@@ -1147,8 +1148,13 @@ fn cmd_stats(args: &[String]) -> ExitCode {
         return ExitCode::SUCCESS;
     }
     println!(
-        "属性名表  : {} 个已解析（共 {} 个属性）",
+        "属性名表  : {} 个{}（共 {} 个属性）",
         catalog.len(),
+        if all {
+            "（含内部字段，可能不生效）"
+        } else {
+            "（游戏会显示，可编辑）"
+        },
         ws.stat_name_count()
     );
     if let Some(f) = &filter {

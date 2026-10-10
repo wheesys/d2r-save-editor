@@ -1,14 +1,16 @@
-//! 物品编辑（里程碑 5）：查看明细、改耐久/数量/防御、增删属性、移动、删除、克隆、导入。
+//! 物品编辑（里程碑 5）：查看明细、改耐久/数量/防御/孔数、增删属性、移动、删除、克隆、导入。
 //!
 //! 设计原则（与里程碑 4 一致）：
 //! - **改动可校验**：写路径仍走 [`crate::edit::EditSession::verify`]，逐字节往返是发布门槛；
-//! - **不写死游戏常量**：属性位宽/上限来自数据集（`ItemStatCost.txt`），
-//!   容器尺寸由用户确认（见 [`crate::layout`]）；
+//! - **不写死游戏常量**：属性位宽/步长来自数据表，容器尺寸由用户确认（见 [`crate::layout`]）；
 //! - **失败安全**：越界、超上限、不存在的下标一律拒绝，不"猜着写"。
 
 use d2s::{ItemPosition, Stat, StatId};
 
 use crate::edit::{EditError, EditSession};
+
+/// 存档里孔数字段是 3 位，所以一件物品最多 7 孔（游戏内核也是这个上限）。
+pub const MAX_SOCKETS: usize = 7;
 
 /// 物品明细（只读展示用）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -46,6 +48,8 @@ pub struct ItemDetail {
     pub socket_count: usize,
     /// 已镶嵌数量。
     pub socketed_count: usize,
+    /// 是否带 `SOCKETED` 标志（孔数字段只有在带这个标志时才写入）。
+    pub socketed_flag: bool,
     /// 属性列表：`(StatId 原始值, 数值, 层)`。
     pub stats: Vec<(u16, i64, i32)>,
     /// 符文之语 ID。
@@ -80,6 +84,17 @@ pub enum ItemEdit {
         index: usize,
         /// 新防御。
         value: i32,
+    },
+    /// 设置孔数（0–7）。
+    ///
+    /// 孔数在存档里就是"`sockets` 的长度"，写进 3 位字段（因此上限 7），
+    /// 且只在物品带 `SOCKETED` 标志时写入；孔数为 0 时同时清掉该标志。
+    /// 已镶嵌的宝石/符文不会被静默丢弃：孔数小于已镶数量时**直接拒绝**。
+    SetSockets {
+        /// 物品序号。
+        index: usize,
+        /// 新孔数。
+        count: usize,
     },
     /// 设置/覆盖一个属性。
     SetStat {
@@ -209,6 +224,7 @@ impl EditSession {
             quantity: item.quantity,
             socket_count: item.sockets.len(),
             socketed_count: item.sockets.iter().filter(|s| s.is_some()).count(),
+            socketed_flag: item.flags.contains(d2s::ItemFlags::SOCKETED),
             stats: item
                 .stats
                 .iter()
@@ -392,6 +408,31 @@ impl EditSession {
                 }
                 self.item_mut(*index)?.defense = Some(*value);
             }
+            ItemEdit::SetSockets { index, count } => {
+                if *count > MAX_SOCKETS {
+                    return Err(EditError::Invalid(format!(
+                        "孔数最多 {MAX_SOCKETS}（存档里是 3 位字段），收到 {count}"
+                    )));
+                }
+                let item = self.item_mut(*index)?;
+                let filled = item.sockets.iter().filter(|s| s.is_some()).count();
+                if *count < filled {
+                    return Err(EditError::Invalid(format!(
+                        "这件物品已经镶了 {filled} 个，孔数不能减到 {count}（先把镶嵌物取出来）"
+                    )));
+                }
+                // 缩：只裁掉空的孔；扩：补 None
+                item.sockets.truncate(*count);
+                while item.sockets.len() < *count {
+                    item.sockets.push(None);
+                }
+                // 孔数为 0 时清掉标志，否则孔数字段不会被写入
+                if *count == 0 {
+                    item.flags.remove(d2s::ItemFlags::SOCKETED);
+                } else {
+                    item.flags.insert(d2s::ItemFlags::SOCKETED);
+                }
+            }
             ItemEdit::SetStat { index, stat, value } => {
                 let item = self.item_mut(*index)?;
                 let id = StatId(*stat);
@@ -460,6 +501,20 @@ impl EditSession {
         Ok(())
     }
 
+    /// 批量应用（原子）。
+    pub fn apply_items(&mut self, edits: &[ItemEdit]) -> Result<(), EditError> {
+        let snapshot = self.file.save.clone();
+        let applied_len = self.item_edits.len();
+        for e in edits {
+            if let Err(err) = self.apply_item(e.clone()) {
+                self.file.save = snapshot;
+                self.item_edits.truncate(applied_len);
+                return Err(err);
+            }
+        }
+        Ok(())
+    }
+
     /// 撤销全部挂起的物品修改，回到打开时的状态。
     ///
     /// 用途：应用层做"写入后读回校验"发现值被截断时回滚。
@@ -476,20 +531,6 @@ impl EditSession {
             self.file.path = path;
         }
         self.item_edits.clear();
-    }
-
-    /// 批量应用（原子）。
-    pub fn apply_items(&mut self, edits: &[ItemEdit]) -> Result<(), EditError> {
-        let snapshot = self.file.save.clone();
-        let applied_len = self.item_edits.len();
-        for e in edits {
-            if let Err(err) = self.apply_item(e.clone()) {
-                self.file.save = snapshot;
-                self.item_edits.truncate(applied_len);
-                return Err(err);
-            }
-        }
-        Ok(())
     }
 
     fn item(&self, index: usize) -> Result<&d2s::Item, EditError> {

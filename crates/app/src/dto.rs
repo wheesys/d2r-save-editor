@@ -139,6 +139,10 @@ pub struct ItemDto {
     pub quantity: Option<i32>,
     /// 镶嵌孔数。
     pub socket_count: usize,
+    /// 已镶嵌数量。
+    pub socketed_count: usize,
+    /// 是否带 SOCKETED 标志（孔数字段只在带标志时写入）。
+    pub socketed_flag: bool,
     /// 占用宽（格）。
     pub width: u32,
     /// 占用高（格）。
