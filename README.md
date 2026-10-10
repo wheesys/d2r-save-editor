@@ -33,6 +33,15 @@ python tools/make-manifest.py --check      # 用清单校验（418 个文件 / 3
 
 详见 [samples/README.md](samples/README.md)。
 
+**发布打包**（数据包不进 git，打包时在本地生成并压缩进产物）：
+
+```powershell
+pwsh -File tools/package.ps1        # → dist/d2r-save-editor-<版本>-win-x64.zip
+```
+
+流程：生成数据包 → 构建前端 → release 构建（数据内嵌进 exe）→ 组装 → 压缩。
+release 构建在缺少数据包时会**直接失败**，避免发出打开就没数据的包。
+
 ## 开发
 
 ```powershell

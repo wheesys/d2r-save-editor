@@ -28,7 +28,7 @@ pub struct Workspace {
     /// 游戏目录（用于定位数据集）。
     pub game_dir: PathBuf,
     /// mod 数据表目录（用户装了 mod 时用于覆盖同名表）。
-    dataset_root: Option<PathBuf>,
+    mod_tables_dir: Option<PathBuf>,
     /// 数据来源说明（展示给用户看）。
     data_source: String,
     /// excel 表集合。
@@ -121,7 +121,7 @@ impl Workspace {
 
         Self {
             game_dir,
-            dataset_root: mod_tables,
+            mod_tables_dir: mod_tables,
             data_source: source,
             tables,
             strings,
@@ -146,6 +146,11 @@ impl Workspace {
             strings: self.strings.len(),
             languages: self.strings.languages().to_vec(),
         }
+    }
+
+    /// 用户自己装的 mod 数据表目录（没有则为空）。
+    pub fn mod_tables_dir(&self) -> Option<&Path> {
+        self.mod_tables_dir.as_deref()
     }
 
     /// 数据包概览（界面可显示"内置数据版本"）。

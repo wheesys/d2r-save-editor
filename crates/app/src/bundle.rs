@@ -16,8 +16,6 @@
 //! 显式指定的目录  >  随程序分发的数据包  >  本机游戏目录里的 loader 产物
 //! ```
 
-use std::path::PathBuf;
-
 use include_dir::{include_dir, Dir};
 
 /// 内嵌的数据包目录。缺失时用 `data-bundle-stub`（只有一个 `.keep`）占位。
