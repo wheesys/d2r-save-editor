@@ -8,8 +8,8 @@ use d2r_core::{
 use d2r_data::{ItemNamer, SkillNamer, Strings, TableStore};
 
 use crate::dto::{
-    AppError, CharacterDto, DatasetInfo, EditRequest, ItemDto, SaveInfo, SaveResult, SkillDto,
-    VerifyResult, WaypointsDto,
+    AppError, CharacterDto, DatasetInfo, EditRequest, ItemDetailDto, ItemDto, ItemStatDto,
+    SaveInfo, SaveResult, SkillDto, VerifyResult, WaypointsDto,
 };
 
 /// 保存结果（内部形态，含是否备份）。
@@ -67,6 +67,8 @@ pub struct Workspace {
     stat_namer: d2r_data::StatNamer,
     /// 当前编辑会话。
     session: Option<EditSession>,
+    /// 当前已打开的存档信息（未打开时为 `None`）。
+    current: Option<SaveInfo>,
 }
 
 /// 默认游戏目录。
@@ -169,6 +171,7 @@ impl Workspace {
             lang: "zhCN".to_string(),
             layout: LayoutSettings::default(),
             session: None,
+            current: None,
         }
     }
 
@@ -224,6 +227,7 @@ impl Workspace {
             roundtrip_identical: session.file.check_roundtrip().identical,
         };
         self.session = Some(session);
+        self.current = Some(info.clone());
         Ok(info)
     }
 
@@ -307,6 +311,11 @@ impl Workspace {
                 active,
             })
             .collect())
+    }
+
+    /// 当前已打开的存档信息（未打开时为 `None`）。
+    pub fn current_save(&self) -> Option<SaveInfo> {
+        self.current.clone()
     }
 
     /// 当前布局设置。
@@ -416,6 +425,60 @@ impl Workspace {
         let (issues, _checked) =
             session.validate_bounds(&self.layout, |code| size_map.get(code).copied());
         Ok(issues)
+    }
+
+    /// 一件物品的完整明细（基础信息 + 带名字的属性列表）。
+    pub fn item_detail_dto(&mut self, index: usize) -> Result<ItemDetailDto, AppError> {
+        let detail = { self.session()?.item_detail(index)? };
+        let size_map = crate::bundle::item_size_map();
+        let mut namer = ItemNamer::new(&self.strings, &mut self.tables, self.lang.clone());
+        let n = namer.resolve(&detail.code, &detail.quality, detail.quality_index);
+        let (w, h) = size_map.get(&detail.code).copied().unwrap_or((1, 1));
+        let mut stats: Vec<ItemStatDto> = detail
+            .stats
+            .iter()
+            .map(|(id, value, layer)| {
+                let info = self.stat_namer.get(*id);
+                ItemStatDto {
+                    id: *id,
+                    layer: *layer,
+                    value: *value,
+                    name: self.stat_namer.display_or_id(*id),
+                    internal: info.map(|s| s.internal.clone()).unwrap_or_default(),
+                    step: info.map(|s| s.step).unwrap_or(1),
+                    has_param_bits: info.map(|s| s.has_param_bits).unwrap_or(false),
+                    user_visible: info.map(|s| s.user_visible).unwrap_or(false),
+                }
+            })
+            .collect();
+        stats.sort_by_key(|s| (s.id, s.layer));
+        Ok(ItemDetailDto {
+            item: ItemDto {
+                index: detail.index,
+                code: detail.code,
+                name: n.display(),
+                name_resolved: n.resolved,
+                quality: detail.quality,
+                level: detail.level,
+                mode: detail.mode,
+                body_location: detail.body_location,
+                store_page: detail.store_page,
+                inv_x: detail.inv_x,
+                inv_y: detail.inv_y,
+                stats_count: detail.stats.len(),
+                defense: detail.defense,
+                durability: detail.durability,
+                max_durability: detail.max_durability,
+                quantity: detail.quantity,
+                socket_count: detail.socket_count,
+                socketed_count: detail.socketed_count,
+                socketed_flag: detail.socketed_flag,
+                width: w,
+                height: h,
+            },
+            stats,
+            runeword_id: detail.runeword_id,
+        })
     }
 
     /// 物品汇总统计。

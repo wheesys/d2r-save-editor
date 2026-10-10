@@ -462,10 +462,11 @@ checksum = "914a755b7c2d4af2bdcff7ce1739e2db9a1b81a9b07123d8015786ae03c0980d"
 
 [[package]]
 name = "d2r-app"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "d2r-core",
  "d2r-data",
+ "d2s",
  "flate2",
  "serde",
  "serde_json",
@@ -473,15 +474,16 @@ dependencies = [
 
 [[package]]
 name = "d2r-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "d2s",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "d2r-data"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",

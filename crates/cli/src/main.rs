@@ -28,6 +28,7 @@ fn main() -> ExitCode {
         "edit" => cmd_edit(&args[1..]),
         "view" => cmd_view(&args[1..]),
         "items" => cmd_items(&args[1..]),
+        "item" => cmd_item(&args[1..]),
         "stats" => cmd_stats(&args[1..]),
         "export-items" => cmd_export_items(&args[1..]),
         "import-item" => cmd_import_item(&args[1..]),
@@ -53,6 +54,7 @@ fn usage() {
          d2r edit      <文件.d2s> --set <JSON> [--out <文件>]  编辑并保存（先校验后落盘）\n  \
          d2r view      <文件.d2s> [--json]                  角色/技能/传送点/物品总览（界面同源数据）\n  \
          d2r items     <文件.d2s> [--filter 关键字] [--json] 物品清单/明细\n  \
+         d2r item      <文件.d2s> --index N [--json]       单件物品明细（属性带中文名与步长）\n  \
          d2r stats     [--filter 关键字] [--json]           属性 ID ↔ 名称对照（编辑属性用）\n  \
          d2r export-items <文件.d2s> [--index N] [--out 文件.json]  导出物品蓝图\n  \
          d2r import-item  <文件.d2s> --blueprint 文件.json --template N [--dry-run]  导入物品\n  \
@@ -1121,6 +1123,107 @@ fn cmd_view(args: &[String]) -> ExitCode {
         println!(
             "  已装备 {} 件，含镶嵌物 {} 件",
             st.equipped, st.with_sockets
+        );
+    }
+    ExitCode::SUCCESS
+}
+fn cmd_item(args: &[String]) -> ExitCode {
+    let json = args.iter().any(|a| a == "--json");
+    let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!("用法: d2r item <文件.d2s> --index N [--json]");
+        return ExitCode::from(2);
+    };
+    let Some(index) = arg_of(args, "--index").and_then(|v| v.parse::<usize>().ok()) else {
+        eprintln!("需要 --index 指定物品序号（用 d2r items 查序号）");
+        return ExitCode::from(2);
+    };
+    let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    if let Err(e) = ws.open(target) {
+        eprintln!("打开失败：{e}");
+        return ExitCode::from(1);
+    }
+    let detail = match ws.item_detail_dto(index) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("读取失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&detail).unwrap());
+        return ExitCode::SUCCESS;
+    }
+
+    let it = &detail.item;
+    println!("物品      : #{} {}（{}）", it.index, it.name, it.code);
+    println!(
+        "位置      : {} {}{}｜占格 {}×{}",
+        it.store_page,
+        it.body_location,
+        if it.body_location == "None" {
+            format!("({},{})", it.inv_x, it.inv_y)
+        } else {
+            String::new()
+        },
+        it.width,
+        it.height
+    );
+    println!(
+        "状态      : 品质 {}｜等级 {}｜{}",
+        it.quality,
+        it.level,
+        if it.name_resolved {
+            "名字已解析"
+        } else {
+            "名字未解析"
+        }
+    );
+    println!(
+        "数值      : 耐久 {}｜数量 {}｜防御 {}｜孔 {}{}{}",
+        it.durability
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".into()),
+        it.quantity
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".into()),
+        it.defense
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "-".into()),
+        it.socket_count,
+        if it.socketed_flag {
+            "（带孔标志）"
+        } else {
+            ""
+        },
+        if it.socketed_count > 0 {
+            format!("，已镶 {}", it.socketed_count)
+        } else {
+            String::new()
+        }
+    );
+    if let Some(rw) = detail.runeword_id {
+        println!("符文之语  : ID {rw}");
+    }
+    println!();
+    println!("属性（{} 条）", detail.stats.len());
+    println!(
+        "{:>5} {:>3}  {:<22} {:<26} {:>12}  说明",
+        "ID", "层", "名称", "内部名", "值"
+    );
+    for s in &detail.stats {
+        let note = if !s.user_visible {
+            "内部字段（可能不生效）".to_string()
+        } else if s.step > 1 {
+            format!("步长 {}", s.step)
+        } else if s.has_param_bits {
+            "含参数".into()
+        } else {
+            String::new()
+        };
+        println!(
+            "{:>5} {:>3}  {:<22} {:<26} {:>12}  {}",
+            s.id, s.layer, s.name, s.internal, s.value, note
         );
     }
     ExitCode::SUCCESS

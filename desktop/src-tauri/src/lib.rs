@@ -11,7 +11,7 @@ pub fn run() {
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState(std::sync::Mutex::new(workspace)))
+        .manage(AppState(std::sync::Arc::new(std::sync::Mutex::new(workspace))))
         .setup(|app| {
             // 窗口在代码里创建（而不是写在 tauri.conf.json 的 app.windows 里），
             // 这样才能显式指定 WebView2 的数据目录。
@@ -42,6 +42,26 @@ pub fn run() {
             builder.build()?;
             Ok(())
         })
+        // 开发/自测用：设置 D2R_OPEN_SAVE=<存档路径> 时，页面加载完成后自动打开该存档，
+        // 免去每次手点文件对话框（对正常使用没有影响）。
+        .on_page_load(|window, _payload| {
+            let Ok(path) = std::env::var("D2R_OPEN_SAVE") else {
+                return;
+            };
+            if path.is_empty() {
+                return;
+            }
+            use tauri::Manager;
+            // app_handle() 返回的是临时值，先 clone 成有所有权的 handle 再取 state
+            let handle = window.app_handle().clone();
+            let shared = handle.state::<AppState>().0.clone();
+            if let Ok(mut workspace) = shared.lock() {
+                match workspace.open(&path) {
+                    Ok(info) => eprintln!("D2R_OPEN_SAVE：已打开 {}", info.path),
+                    Err(e) => eprintln!("D2R_OPEN_SAVE：打开失败 {e}"),
+                }
+            };
+        })
         .invoke_handler(tauri::generate_handler![
             commands::dataset_info,
             commands::open_save,
@@ -58,6 +78,13 @@ pub fn run() {
             commands::layout_questions,
             commands::set_layout,
             commands::validate_bounds,
+            commands::item_detail,
+            commands::stat_catalog,
+            commands::import_item,
+            commands::export_item,
+            commands::write_blueprint,
+            commands::read_blueprint,
+            commands::current_save,
             commands::apply_edits,
             commands::verify,
             commands::save,

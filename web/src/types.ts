@@ -51,20 +51,24 @@ export interface ItemDto {
   index: number;
   code: string;
   name: string;
-  name_resolved: boolean;
+  // 后端这些字段是 camelCase 序列化的（DTO 上是 snake_case），
+  // 早期这里跟着 Rust 字段名写成了 snake_case，导致界面上取到 undefined。
+  nameResolved: boolean;
   quality: string;
   level: number;
   mode: string;
-  body_location: string;
-  store_page: string;
-  inv_x: number;
-  inv_y: number;
-  stats_count: number;
+  bodyLocation: string;
+  storePage: string;
+  invX: number;
+  invY: number;
+  statsCount: number;
   defense: number | null;
   durability: number | null;
   maxDurability: number | null;
   quantity: number | null;
   socketCount: number;
+  socketedCount: number;
+  socketedFlag: boolean;
   width: number;
   height: number;
 }
@@ -115,6 +119,7 @@ export type ItemEdit =
   | { kind: "setQuantity"; index: number; value: number }
   | { kind: "setDurability"; index: number; value: number }
   | { kind: "setDefense"; index: number; value: number }
+  | { kind: "setSockets"; index: number; count: number }
   | { kind: "setStat"; index: number; stat: number; value: number }
   | { kind: "removeStat"; index: number; stat: number }
   | { kind: "moveTo"; index: number; col: number; row: number }
@@ -160,4 +165,30 @@ export interface BoundsIssue {
   at: [number, number];
   size: [number, number];
   container: [number, number];
+}
+export interface ItemStatDto {
+  id: number;
+  layer: number;
+  value: number;
+  name: string;
+  internal: string;
+  step: number;
+  hasParamBits: boolean;
+  userVisible: boolean;
+}
+
+export interface ItemDetailDto {
+  item: ItemDto;
+  stats: ItemStatDto[];
+  runewordId: number | null;
+}
+
+export interface StatCatalogEntry {
+  id: number;
+  name: string;
+  internal: string;
+  step: number;
+  hasParamBits: boolean;
+  userVisible: boolean;
+  descTemplate: string | null;
 }

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import {
   type AppError,
@@ -10,6 +10,8 @@ import {
   type ItemEdit,
   type ItemStats,
   type BundleInfo,
+  type ItemDetailDto,
+  type StatCatalogEntry,
   type LayoutSettings,
   type LayoutHints,
   type BoundsIssue,
@@ -128,9 +130,15 @@ function renderWaypoints(list: WaypointsDto[]) {
   $("#waypoints-section").classList.remove("hidden");
 }
 
+/** 当前选中的物品序号（用于明细面板） */
+let selectedItem: number | null = null;
+/** 属性目录缓存 */
+let statCatalog: StatCatalogEntry[] = [];
+
+/** 物品列表行：点一行进入明细 */
 function renderItems(list: ItemDto[]) {
   const byPage = new Map<string, number>();
-  for (const it of list) byPage.set(it.store_page, (byPage.get(it.store_page) ?? 0) + 1);
+  for (const it of list) byPage.set(it.storePage, (byPage.get(it.storePage) ?? 0) + 1);
   $("#items-summary").textContent =
     `共 ${list.length} 件｜` +
     [...byPage.entries()].map(([k, v]) => `${k}: ${v}`).join("｜");
@@ -145,18 +153,23 @@ function renderItems(list: ItemDto[]) {
         it.quantity !== null
           ? `<input type="number" class="cell-input" min="1" max="511" value="${it.quantity}" data-qty-index="${it.index}" />`
           : `<span class="muted">—</span>`;
-      return `<tr>
+      // 孔数：0 孔也给个输入框，方便加孔
+      const sockCell =
+        `<input type="number" class="cell-input" min="0" max="7" value="${it.socketCount}" data-sock-index="${it.index}" />` +
+        (it.socketedCount > 0 ? `<span class="muted"> 镶${it.socketedCount}</span>` : "");
+      const sel = selectedItem === it.index ? " class=\"selected\"" : "";
+      return `<tr data-item-index="${it.index}"${sel}>
         <td>${it.index}</td>
         <td>${it.code}</td>
-        <td>${it.name}${it.name_resolved ? "" : " <span class='muted'>(未解析)</span>"}</td>
+        <td>${it.name}${it.nameResolved ? "" : " <span class='muted'>(未解析)</span>"}</td>
         <td>${it.quality}</td>
         <td>${it.level}</td>
-        <td>${it.store_page}${it.body_location !== "None" ? ` · ${it.body_location}` : ""}</td>
+        <td>${shortPage(it.storePage)}${it.bodyLocation !== "None" ? ` · ${shortSlot(it.bodyLocation)}` : ` (${it.invX},${it.invY})`}</td>
         <td>${it.width}×${it.height}</td>
         <td>${durCell}</td>
         <td>${qtyCell}</td>
-        <td>${it.socketCount > 0 ? it.socketCount : "—"}</td>
-        <td>${it.stats_count}</td>
+        <td>${sockCell}</td>
+        <td>${it.statsCount}</td>
       </tr>`;
     })
     .join("");
@@ -166,10 +179,53 @@ function renderItems(list: ItemDto[]) {
       <th>#</th><th>代码</th><th>名称</th><th>品质</th><th>等级</th>
       <th>位置</th><th>占格</th><th>耐久</th><th>数量</th><th>孔</th><th>属性</th>
      </tr></thead><tbody>${rows}</tbody>`;
+
+  // 点行选中（点输入框不算）
+  document.querySelectorAll<HTMLTableRowElement>("#items tbody tr").forEach((tr) => {
+    tr.addEventListener("click", (ev) => {
+      const target = ev.target as HTMLElement;
+      if (target.tagName === "INPUT") return;
+      const idx = Number(tr.dataset.itemIndex);
+      void selectItem(idx);
+    });
+  });
   $("#items-section").classList.remove("hidden");
 }
 
-/** 收集物品表里的改动（耐久/数量） */
+/** 存储页中文缩写 */
+function shortPage(page: string): string {
+  const map: Record<string, string> = {
+    Inventory: "背包",
+    Stash: "箱子",
+    Cube: "方块",
+    Belt: "腰带",
+    Equip: "装备",
+    Null: "—",
+    Trade: "交易",
+  };
+  return map[page] ?? page;
+}
+
+/** 装备位中文缩写 */
+function shortSlot(slot: string): string {
+  const map: Record<string, string> = {
+    Head: "头",
+    Neck: "颈",
+    Torso: "身",
+    RightArm: "右臂",
+    LeftArm: "左臂",
+    RightRing: "右戒",
+    LeftRing: "左戒",
+    Belt: "腰",
+    Feet: "脚",
+    Gloves: "手",
+    RightHand: "右手",
+    LeftHand: "左手",
+  };
+  return map[slot] ?? slot;
+}
+
+/** 收集物品表里的改动（耐久/数量/孔数） */
 function collectItemEdits(): ItemEdit[] {
   const edits: ItemEdit[] = [];
   document.querySelectorAll<HTMLInputElement>("input[data-dur-index]").forEach((el) => {
@@ -184,8 +240,158 @@ function collectItemEdits(): ItemEdit[] {
     const old = items.find((i) => i.index === index)?.quantity ?? 0;
     if (value !== old) edits.push({ kind: "setQuantity", index, value });
   });
+  document.querySelectorAll<HTMLInputElement>("input[data-sock-index]").forEach((el) => {
+    const index = Number(el.dataset.sockIndex);
+    const count = Number(el.value);
+    const old = items.find((i) => i.index === index)?.socketCount ?? 0;
+    if (count !== old) edits.push({ kind: "setSockets", index, count });
+  });
   return edits;
 }
+
+/** 选中一件物品，打开明细面板 */
+async function selectItem(index: number) {
+  selectedItem = index;
+  renderItems(items);
+  try {
+    const detail = await call<ItemDetailDto>("item_detail", { index });
+    renderItemDetail(detail);
+  } catch (e) {
+    showError(e, "读取物品明细失败");
+  }
+}
+
+/** 渲染明细面板 */
+function renderItemDetail(detail: ItemDetailDto) {
+  const it = detail.item;
+  $("#detail-title").textContent = `${it.name}（${it.code} #${it.index}）`;
+  $("#detail-summary").textContent =
+    `品质 ${it.quality}｜等级 ${it.level}｜位置 ${shortPage(it.storePage)}` +
+    (it.bodyLocation !== "None" ? `·${shortSlot(it.bodyLocation)}` : ` (${it.invX},${it.invY})`) +
+    `｜占格 ${it.width}×${it.height}｜已镶嵌 ${it.socketedCount}` +
+    (detail.runewordId !== null ? `｜符文之语 ${detail.runewordId}` : "");
+
+  // 基础字段：没有该概念的禁用掉
+  const setNum = (sel: string, value: number | null, enabled: boolean, max?: number) => {
+    const el = $(sel) as HTMLInputElement;
+    el.value = value === null ? "" : String(value);
+    el.disabled = !enabled;
+    if (max !== undefined) el.max = String(max);
+  };
+  setNum("#d-sockets", it.socketCount, true, 7);
+  setNum("#d-durability", it.durability, it.maxDurability !== null && it.maxDurability > 0, it.maxDurability ?? undefined);
+  setNum("#d-quantity", it.quantity, it.quantity !== null, 511);
+  setNum("#d-defense", it.defense, it.defense !== null, 65535);
+
+  $("#stat-count").textContent = String(detail.stats.length);
+  const rows = detail.stats
+    .map((s) => {
+      const stepNote =
+        s.step > 1
+          ? `<span class="muted">步长 ${s.step}</span>`
+          : s.hasParamBits
+            ? `<span class="muted">含参数</span>`
+            : "";
+      const nameCls = s.userVisible ? "" : " class=\"muted\"";
+      return `<tr>
+        <td>${s.id}</td>
+        <td${nameCls}>${s.name}${s.userVisible ? "" : " <span class='muted'>(内部字段)</span>"}</td>
+        <td class="muted">${s.internal}</td>
+        <td><input type="number" class="cell-input" value="${s.value}" data-stat-id="${s.id}" data-stat-layer="${s.layer}" /></td>
+        <td>${stepNote}</td>
+        <td><button class="mini danger" data-del-stat="${s.id}" data-del-layer="${s.layer}">删除</button></td>
+      </tr>`;
+    })
+    .join("");
+  $("#item-stats").innerHTML =
+    `<thead><tr><th>ID</th><th>属性</th><th>内部名</th><th>值</th><th>说明</th><th></th></tr></thead>` +
+    `<tbody>${rows}</tbody>`;
+
+  // 删除属性按钮
+  document.querySelectorAll<HTMLButtonElement>("button[data-del-stat]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      pendingDetailEdits.push({
+        kind: "removeStat",
+        index: it.index,
+        stat: Number(btn.dataset.delStat),
+      });
+      toast("已记录删除，点「应用该物品的修改」生效");
+    });
+  });
+
+  $("#item-detail-section").classList.remove("hidden");
+}
+
+/** 明细面板里挂起的改动（删除属性等） */
+const pendingDetailEdits: ItemEdit[] = [];
+
+/** 收集明细面板的改动 */
+function collectDetailEdits(): ItemEdit[] {
+  const edits: ItemEdit[] = [...pendingDetailEdits];
+  const index = selectedItem;
+  if (index === null) return edits;
+  const it = items.find((i) => i.index === index);
+  if (!it) return edits;
+
+  const num = (sel: string): number | null => {
+    const el = $(sel) as HTMLInputElement;
+    if (el.disabled || el.value === "") return null;
+    return Number(el.value);
+  };
+  const sockets = num("#d-sockets");
+  if (sockets !== null && sockets !== it.socketCount) {
+    edits.push({ kind: "setSockets", index, count: sockets });
+  }
+  const dur = num("#d-durability");
+  if (dur !== null && dur !== it.durability) edits.push({ kind: "setDurability", index, value: dur });
+  const qty = num("#d-quantity");
+  if (qty !== null && qty !== it.quantity) edits.push({ kind: "setQuantity", index, value: qty });
+  const def = num("#d-defense");
+  if (def !== null && def !== it.defense) edits.push({ kind: "setDefense", index, value: def });
+
+  // 属性值
+  document.querySelectorAll<HTMLInputElement>("input[data-stat-id]").forEach((el) => {
+    const stat = Number(el.dataset.statId);
+    const value = Number(el.value);
+    edits.push({ kind: "setStat", index, stat, value });
+  });
+  return edits;
+}
+
+/** 应用明细面板的改动 */
+async function applyDetailEdits() {
+  const edits = collectDetailEdits().filter(
+    (e) => e.kind !== "setStat" || true, // 属性值一律提交（后端幂等）
+  );
+  if (edits.length === 0) {
+    toast("没有需要应用的修改", "error");
+    return;
+  }
+  try {
+    const n = await call<number>("apply_item_edits", { edits });
+    pendingDetailEdits.length = 0;
+    toast(`已应用 ${n} 条修改。点「保存」才会写入文件。`);
+    await loadAll();
+    if (selectedItem !== null) await selectItem(selectedItem);
+  } catch (e) {
+    showError(e, "修改被拒绝");
+    $("#detail-result").textContent = String((e as { message?: string })?.message ?? e);
+  }
+}
+
+/** 载入属性目录并填充下拉 */
+async function loadStatCatalog() {
+  try {
+    statCatalog = await call<StatCatalogEntry[]>("stat_catalog", { all: false });
+    const sel = $("#add-stat-select") as HTMLSelectElement;
+    sel.innerHTML = statCatalog
+      .map((s) => `<option value="${s.id}">${s.name}（${s.internal}${s.step > 1 ? `，步长${s.step}` : ""}）</option>`)
+      .join("");
+  } catch {
+    /* 老后端没有这个命令 */
+  }
+}
+
 async function loadAll() {
   try {
     const info = await call<BundleInfo>("bundle_info");
@@ -210,6 +416,7 @@ async function loadAll() {
   renderWaypoints(await call<WaypointsDto[]>("waypoints"));
   items = await call<ItemDto[]>("item_details");
   renderItems(items);
+  await loadStatCatalog();
   await refreshLayout();
   setDirty(await call<boolean>("is_dirty"));
 }
@@ -299,7 +506,90 @@ async function checkBounds() {
     showError(e, "越界校验失败");
   }
 }
+
+/** 启动自检：后端若已打开存档（例如开发时用 D2R_OPEN_SAVE 自动打开），直接进入编辑界面 */
+async function bootIfAlreadyOpen() {
+  try {
+    const info = await call<SaveInfo | null>("current_save");
+    if (!info) return;
+    renderSaveInfo(info);
+    if (info.kind === "stash") {
+      $("#items-section").classList.add("hidden");
+      return;
+    }
+    await loadAll();
+  } catch {
+    /* 后端没有这个命令时忽略 */
+  }
+}
+
 function bind() {
+  // 明细面板：应用该物品的修改 / 添加属性
+  $("#btn-apply-detail").addEventListener("click", applyDetailEdits);
+  $("#btn-add-stat").addEventListener("click", () => {
+    const id = Number(($("#add-stat-select") as HTMLSelectElement).value);
+    const value = Number(($("#add-stat-value") as HTMLInputElement).value);
+    if (selectedItem === null) {
+      toast("先在物品表里点一件物品", "error");
+      return;
+    }
+    pendingDetailEdits.push({ kind: "setStat", index: selectedItem, stat: id, value });
+    const entry = statCatalog.find((s) => s.id === id);
+    toast(`已记录：${entry?.name ?? `属性#${id}`} = ${value}。点「应用该物品的修改」生效。`);
+  });
+
+  // 导入/导出物品
+  $("#btn-export-item").addEventListener("click", async () => {
+    if (selectedItem === null) {
+      toast("先在物品表里点一件物品", "error");
+      return;
+    }
+    try {
+      const bp = await call<unknown>("export_item", { index: selectedItem });
+      const dest = await saveDialog({
+        defaultPath: `item-${selectedItem}.json`,
+        filters: [{ name: "物品蓝图", extensions: ["json"] }],
+      });
+      if (!dest || typeof dest !== "string") return;
+      await call<string>("write_blueprint", { path: dest, json: JSON.stringify(bp, null, 2) });
+      toast(`已导出到 ${dest}`);
+    } catch (e) {
+      showError(e, "导出物品失败");
+    }
+  });
+
+  $("#btn-import-item").addEventListener("click", async () => {
+    try {
+      const picked = await openDialog({
+        multiple: false,
+        filters: [{ name: "物品蓝图", extensions: ["json"] }],
+      });
+      if (!picked || typeof picked !== "string") return;
+      const json = await call<string>("read_blueprint", { path: picked });
+      const templateRaw = window.prompt(
+        `蓝图：${picked}\n\n用存档里的哪件物品当模板？（填序号，回车确认）`,
+        String(selectedItem ?? 0),
+      );
+      if (templateRaw === null) return;
+      const template = Number(templateRaw);
+      if (!Number.isInteger(template) || template < 0) {
+        toast("模板序号必须是整数", "error");
+        return;
+      }
+      const outcome = await call<{ index: number; statsReplaced: number }>("import_item", {
+        blueprintJson: json,
+        template,
+      });
+      toast(`已导入为 #${outcome.index}（覆盖 ${outcome.statsReplaced} 条属性）。点「保存」写入文件。`);
+      await loadAll();
+      await selectItem(outcome.index);
+    } catch (e) {
+      showError(e, "导入物品失败");
+    }
+  });
+
+  void bootIfAlreadyOpen();
+
   $("#btn-open").addEventListener("click", async () => {
     try {
       const picked = await openDialog({

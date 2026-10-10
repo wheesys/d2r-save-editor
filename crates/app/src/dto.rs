@@ -149,6 +149,39 @@ pub struct ItemDto {
     pub height: u32,
 }
 
+/// 物品上的一条属性（含中文名与步长，界面直接用）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemStatDto {
+    /// 属性 ID。
+    pub id: u16,
+    /// 层（多数为 0）。
+    pub layer: i32,
+    /// 当前数值。
+    pub value: i64,
+    /// 中文名（解析不出时为 `属性#id`）。
+    pub name: String,
+    /// 内部名（数据表里的 `Stat`）。
+    pub internal: String,
+    /// 值的最小小步长（>1 时值必须是它的倍数）。
+    pub step: i64,
+    /// 是否带参数位（值里含参数分量，界面应提示）。
+    pub has_param_bits: bool,
+    /// 游戏是否会为它生成描述（`false` = 内部字段）。
+    pub user_visible: bool,
+}
+
+/// 一件物品的完整明细（界面的物品编辑面板用）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemDetailDto {
+    /// 基础信息（与列表里同一件）。
+    pub item: ItemDto,
+    /// 属性列表（含名字）。
+    pub stats: Vec<ItemStatDto>,
+    /// 符文之语 ID。
+    pub runeword_id: Option<u16>,
+}
 /// 修改请求（前端 → 后端）。
 ///
 /// 与 `d2r_core::Edit` 的 JSON 形态一致（`tag = "kind"`）。

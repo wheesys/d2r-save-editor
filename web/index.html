@@ -83,9 +83,51 @@
         <h2>物品</h2>
         <div id="items-summary" class="muted"></div>
         <div id="items-stats" class="muted"></div>
-        <p class="muted">改「耐久」或「数量」后点下面的按钮应用；写盘前会做完整校验。</p>
-        <div class="actions"><button id="btn-apply-items">应用物品修改</button></div>
+        <p class="muted">
+          改「耐久」「数量」「孔数」后点下面的按钮应用；<strong>点某一行</strong>可以编辑该物品的属性。
+        </p>
+        <div class="actions">
+          <button id="btn-apply-items">应用物品修改</button>
+          <button id="btn-import-item">导入物品（蓝图 JSON）…</button>
+          <button id="btn-export-item">导出选中物品</button>
+        </div>
         <div class="table-wrap"><table id="items"></table></div>
+      </section>
+
+      <section id="item-detail-section" class="card hidden">
+        <h2>物品属性：<span id="detail-title">—</span></h2>
+        <div id="detail-summary" class="muted"></div>
+
+        <div class="grid">
+          <label>孔数
+            <input id="d-sockets" type="number" min="0" max="7" />
+          </label>
+          <label>当前耐久
+            <input id="d-durability" type="number" min="0" />
+          </label>
+          <label>堆叠数量
+            <input id="d-quantity" type="number" min="1" max="511" />
+          </label>
+          <label>防御
+            <input id="d-defense" type="number" min="0" max="65535" />
+          </label>
+        </div>
+
+        <h3>属性（<span id="stat-count">0</span> 条）</h3>
+        <p class="muted">
+          值必须落在游戏能精确存储的范围内：<strong>步长 &gt; 1 的属性，值要是步长的倍数</strong>，
+          否则写盘会被截断，程序会直接拒绝。
+        </p>
+        <div class="table-wrap">
+          <table id="item-stats"></table>
+        </div>
+        <div class="actions">
+          <select id="add-stat-select"></select>
+          <input id="add-stat-value" type="number" value="1" />
+          <button id="btn-add-stat">添加属性</button>
+          <button id="btn-apply-detail" class="primary">应用该物品的修改</button>
+        </div>
+        <div id="detail-result" class="muted"></div>
       </section>
     </main>
 

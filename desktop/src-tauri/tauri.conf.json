@@ -20,10 +20,5 @@
         "type": "downloadBootstrapper"
       }
     }
-  },
-  "windows": {
-    "productName": "D2R Save Editor",
-    "fileDescription": "D2R 存档修改器",
-    "copyright": "MIT"
   }
 }

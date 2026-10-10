@@ -137,3 +137,15 @@ tr:hover td { background: var(--panel-2); }
   font-size: 13px;
 }
 .ok { color: var(--ok); }
+/* 物品表：选中行高亮 + 可点击 */
+#items tbody tr { cursor: pointer; }
+#items tbody tr.selected { background: var(--panel-2); outline: 1px solid var(--accent); }
+#items tbody tr:hover { background: var(--panel-2); }
+
+/* 小按钮（删除属性等） */
+button.mini { padding: 2px 8px; font-size: 12px; }
+button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
+
+/* 属性表（明细面板） */
+#item-stats td { white-space: nowrap; }
+#item-detail-section h3 { margin: 14px 0 6px; font-size: 14px; }

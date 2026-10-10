@@ -12,7 +12,7 @@ use d2r_app::{
 use tauri::State;
 
 /// 应用状态：一个工作区（同一时间只编辑一个存档）。
-pub struct AppState(pub Mutex<Workspace>);
+pub struct AppState(pub std::sync::Arc<Mutex<Workspace>>);
 
 type R<T> = Result<T, AppError>;
 
@@ -134,6 +134,52 @@ pub fn set_layout(state: State<'_, AppState>, layout: d2r_core::LayoutSettings) 
 #[tauri::command]
 pub fn validate_bounds(state: State<'_, AppState>) -> R<Vec<d2r_core::BoundsIssue>> {
     state.0.lock().unwrap().validate_bounds()
+}
+/// 一件物品的完整明细（含带名字的属性列表）。
+#[tauri::command]
+pub fn item_detail(state: State<'_, AppState>, index: usize) -> R<d2r_app::ItemDetailDto> {
+    state.0.lock().unwrap().item_detail_dto(index)
+}
+
+/// 属性目录（界面做"添加属性"下拉用）。`all = true` 时含内部字段。
+#[tauri::command]
+pub fn stat_catalog(state: State<'_, AppState>, all: Option<bool>) -> Vec<d2r_app::StatCatalogEntry> {
+    state.0.lock().unwrap().stat_catalog(all.unwrap_or(false))
+}
+
+/// 导入一件物品：从 JSON 蓝图克隆模板并覆盖属性。
+#[tauri::command]
+pub fn import_item(
+    state: State<'_, AppState>,
+    blueprint_json: String,
+    template: usize,
+) -> R<d2r_core::ImportOutcome> {
+    let blueprint = d2r_core::parse_blueprint(&blueprint_json)
+        .map_err(|e| d2r_app::AppError::invalid(format!("蓝图不合法：{e}")))?;
+    state.0.lock().unwrap().import_blueprint(&blueprint, template)
+}
+
+/// 导出某件物品为蓝图 JSON。
+#[tauri::command]
+pub fn export_item(state: State<'_, AppState>, index: usize) -> R<d2r_core::ItemBlueprint> {
+    state.0.lock().unwrap().export_blueprint(index)
+}
+/// 把物品蓝图写到文件。
+#[tauri::command]
+pub fn write_blueprint(path: String, json: String) -> R<String> {
+    std::fs::write(&path, json).map_err(|e| d2r_app::AppError::new("write", e.to_string()))?;
+    Ok(path)
+}
+
+/// 从文件读物品蓝图文本。
+#[tauri::command]
+pub fn read_blueprint(path: String) -> R<String> {
+    std::fs::read_to_string(&path).map_err(|e| d2r_app::AppError::new("read", e.to_string()))
+}
+/// 当前已打开的存档（未打开时返回 null）。
+#[tauri::command]
+pub fn current_save(state: State<'_, AppState>) -> Option<SaveInfo> {
+    state.0.lock().unwrap().current_save()
 }
 /// 应用版本信息。
 #[tauri::command]
