@@ -137,6 +137,8 @@ fn cmd_roundtrip(args: &[String]) -> ExitCode {
                 let items = file.save.items.len();
                 let who = if file.kind == SaveKind::Character {
                     format!("{} Lv{} {:?}", file.save.name(), file.save.character.level, file.save.character.class)
+                } else if let Some(st) = &file.stash {
+                    format!("共享箱 结构v{} 存档v{} 物品{}", st.structure_version, st.save_version, st.item_count)
                 } else {
                     "共享箱".to_string()
                 };
@@ -203,6 +205,38 @@ fn cmd_inspect(args: &[String]) -> ExitCode {
     } else {
         vec![None; file.save.items.len()]
     };
+
+    // 共享箱：结构不同，单独输出
+    if let Some(st) = &file.stash {
+        println!("文件      : {}", file.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default());
+        println!("类型      : 共享储物箱（.d2i）");
+        println!("结构版本  : {}", st.structure_version);
+        println!("存档版本  : {} (还原值 {})", file.version(), st.save_version);
+        println!("头部声明长度: {}（实际 {}）", st.declared_size, file.original.len());
+        println!("名称      : {:?}", st.name);
+        println!("金币      : {}", st.gold);
+        println!("物品段    : 偏移 {}，物品数 {}，{} 字节", st.items_offset(), st.item_count, st.items_bytes.len());
+        println!("校验和    : 无（.d2i 不存 CRC，已实测确认）");
+        let rt = file.check_roundtrip();
+        println!("往返一致  : {}", if rt.identical { "是" } else { "否" });
+        if json {
+            let out = serde_json::json!({
+                "path": file.path.as_ref().map(|p| p.display().to_string()),
+                "kind": "stash",
+                "structure_version": st.structure_version,
+                "save_version": st.save_version,
+                "declared_size": st.declared_size,
+                "name": st.name,
+                "gold": st.gold,
+                "items_offset": st.items_offset(),
+                "item_count": st.item_count,
+                "items_bytes": st.items_bytes.len(),
+                "roundtrip_identical": rt.identical,
+            });
+            println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        }
+        return ExitCode::SUCCESS;
+    }
 
     if json {
         let items: Vec<serde_json::Value> = file

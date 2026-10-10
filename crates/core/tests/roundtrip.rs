@@ -15,12 +15,9 @@ use d2r_core::{SaveFile, SaveKind};
 /// 已知无法逐字节往返的样本（文件名 → 原因），需要显式豁免。
 const KNOWN_NON_IDENTICAL: &[(&str, &str)] = &[
     (
-        "ModernSharedStashSoftCoreV2.d2i",
-        "共享箱段序与 .d2s 不同：d2s-rs 报 invalid quest section magic。需要改动前后样本反推 .d2i 结构。",
-    ),
-    (
         "杜老二.d2s",
-        "写回多 2 字节（首个差异在偏移 8 = 文件长度字段）。该角色带 .d2rl/.abs 旁车，需逐段定位。",
+        "条目段编码差异：重写后长 2 字节，前缀只相同 8 字节、后缀相同 1166 字节 —— 不是尾部填充，\
+         而是条目流整体不同（`cmp-bytes` + `rewrite-save` 可复现）。需逐件定位是哪种条目被写成了不同编码。",
     ),
 ];
 

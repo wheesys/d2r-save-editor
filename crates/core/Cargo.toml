@@ -16,3 +16,11 @@ serde = { workspace = true, optional = true }
 [features]
 default = []
 serde = ["dep:serde"]
+
+[[bin]]
+name = "cmp-bytes"
+path = "src/bin/cmp_bytes.rs"
+
+[[bin]]
+name = "rewrite-save"
+path = "src/bin/rewrite_save.rs"

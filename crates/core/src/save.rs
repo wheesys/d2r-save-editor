@@ -43,6 +43,11 @@ pub struct SaveFile {
     pub original: Vec<u8>,
     /// 解析后的结构。
     pub save: d2s::D2Save,
+    /// `.d2i` 结构化视图（仅共享箱有）。
+    ///
+    /// 共享箱目前用"字节保真"策略：物品段位流布局尚未逐字段验证，
+    /// 所以写回时用这里保存的原始字节，保证逐字节一致。
+    pub stash: Option<crate::d2i::SharedStash>,
 }
 
 impl fmt::Debug for SaveFile {
@@ -52,6 +57,7 @@ impl fmt::Debug for SaveFile {
             .field("kind", &self.kind)
             .field("header", &self.header)
             .field("len", &self.original.len())
+            .field("stash", &self.stash.as_ref().map(|s| s.item_count))
             .finish()
     }
 }
@@ -70,17 +76,37 @@ impl SaveFile {
     /// 从内存读取（用于测试与从旁车/网络来源加载）。
     pub fn from_bytes(kind: SaveKind, bytes: Vec<u8>) -> Result<Self, SaveError> {
         let header = SaveHeader::parse_checked(&bytes).map_err(SaveError::Header)?;
+        // `.d2i` 的段结构与 `.d2s` 不同（没有任务/传送点/属性/技能段），
+        // 必须走共享箱解析器；d2s 解析库对它会报 "invalid quest section magic"。
+        if kind == SaveKind::Stash {
+            let stash = crate::d2i::SharedStash::parse(&bytes).map_err(|e| SaveError::Parse(e.to_string()))?;
+            // `save` 字段仅为兼容既有接口；共享箱的真实数据在 `stash`，写回也走 `stash`。
+            let save = d2s::D2Save::from_bytes(&bytes).unwrap_or_default();
+            return Ok(Self { path: None, kind, header, original: bytes, save, stash: Some(stash) });
+        }
         let save = d2s::D2Save::from_bytes(&bytes).map_err(|e| SaveError::Parse(e.to_string()))?;
-        Ok(Self { path: None, kind, header, original: bytes, save })
+        Ok(Self { path: None, kind, header, original: bytes, save, stash: None })
     }
 
     /// 存档版本。
+    ///
+    /// `.d2i` 的头部第 2 个 DWORD 是**结构版本**（样本 = 2），真正的存档版本在偏移 8，
+    /// 所以共享箱取 [`crate::d2i::SharedStash::save_version`]。
     pub fn version(&self) -> SaveVersion {
-        SaveVersion::from_number(self.header.version)
+        match &self.stash {
+            Some(s) => SaveVersion::from_number(s.save_version),
+            None => SaveVersion::from_number(self.header.version),
+        }
     }
 
     /// 序列化回字节。
+    ///
+    /// - `.d2i`：用字节保真的共享箱包装（见 [`crate::d2i::SharedStash`]）；
+    /// - `.d2s`：交给解析库序列化。
     pub fn to_bytes(&self) -> Result<Vec<u8>, SaveError> {
+        if let Some(stash) = &self.stash {
+            return Ok(stash.to_bytes());
+        }
         self.save.to_bytes().map_err(|e| SaveError::Write(e.to_string()))
     }
 
