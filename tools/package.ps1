@@ -18,7 +18,11 @@
     避免发出一个打开就没数据的包。
 
 .PARAMETER SkipBundle
-    跳过数据包生成（数据包已就绪时用）。
+    跳过数据包生成（数据包已就绪时用）。会明确警告"可能打包了旧数据"。
+
+.PARAMETER KeepBundle
+    源数据不在时允许复用现有数据包。默认行为是：源数据在就**重新生成**，
+    保证打进 exe 的永远是最新数据；源数据不在则报错（而不是静默用旧包）。
 
 .PARAMETER SkipFrontend
     跳过前端构建（前端未改动时用）。
@@ -32,6 +36,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipBundle,
+    [switch]$KeepBundle,
     [switch]$SkipFrontend,
     [string]$Version
 )
@@ -56,26 +61,48 @@ if (-not $Version) {
 $dist = Join-Path $repo 'dist'
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
-# 1) 数据包
-if (-not $SkipBundle) {
-    Step '生成数据包（内嵌进 exe）'
+# 1) 数据包（会随 release 构建被内嵌进 exe）
+#
+# 默认策略：源数据在就重新生成，保证打进 exe 的是最新表；
+# 源数据不在才考虑复用现有数据包（-KeepBundle），且明确警告。
+$bundleMarker = Join-Path $repo 'crates\app\data-bundle\BUNDLE.json'
+$srcData = Join-Path $repo 'samples\game-data\excel'
+$haveSrc = (Test-Path $srcData) -and ((Get-ChildItem $srcData -Filter *.txt -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
+
+if ($haveSrc) {
+    Step '生成数据包（随后会被内嵌进 exe）'
     $py = (Get-Command python -ErrorAction SilentlyContinue).Source
     if (-not $py) {
-        # 退回 bundled python
         $cand = 'C:\Users\walle\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe'
         if (Test-Path $cand) { $py = $cand }
     }
-    if (-not $py) { throw '找不到 python，无法生成数据包（或用 -SkipBundle）' }
-    & $py (Join-Path $PSScriptRoot 'make-bundle.py')
-    if ($LASTEXITCODE -ne 0) { throw '数据包生成失败' }
-    Ok '数据包就绪'
+    if (-not $py) {
+        if ((Test-Path $bundleMarker) -and -not $KeepBundle) {
+            throw "源数据在但找不到 python：无法刷新数据包。请装 python，或显式传 -KeepBundle 复用现有数据包"
+        }
+        Warn '找不到 python，跳过数据包生成'
+    } else {
+        & $py (Join-Path $PSScriptRoot 'make-bundle.py')
+        if ($LASTEXITCODE -ne 0) { throw '数据包生成失败' }
+        Ok '数据包已按本机源数据重新生成'
+    }
+} elseif (Test-Path $bundleMarker) {
+    if ($SkipBundle -or $KeepBundle) {
+        Warn '源数据不在，复用现有数据包 —— **可能打包了旧数据**，请确认它的来源与时间'
+        $age = (Get-Date) - (Get-Item $bundleMarker).LastWriteTime
+        Warn ("现有数据包生成于 {0:yyyy-MM-dd HH:mm}（{1:N1} 小时前）" -f (Get-Item $bundleMarker).LastWriteTime, $age.TotalHours)
+    } else {
+        throw "源数据不在（$srcData），但现有数据包存在。`n默认不静默复用它（避免发货时用了旧表）。`n确认要复用请显式传 -KeepBundle。"
+    }
 } else {
-    Warn '按参数跳过数据包生成'
+    throw "既没有源数据（$srcData），也没有数据包（$bundleMarker）。`n请先运行 tools/fetch-data.ps1 导出数据，再运行 tools/make-bundle.py。"
 }
-$bundleMarker = Join-Path $repo 'crates\app\data-bundle\BUNDLE.json'
+
 if (-not (Test-Path $bundleMarker)) {
-    throw "数据包不存在：$bundleMarker —— release 构建会失败，请先运行 tools/make-bundle.py"
+    throw "数据包不存在：$bundleMarker —— release 构建会失败"
 }
+$bundleMb = [math]::Round(((Get-ChildItem (Split-Path $bundleMarker) -Recurse -File | Measure-Object -Sum Length).Sum / 1MB), 2)
+Ok "数据包就绪（$bundleMb MB，将内嵌进 exe）"
 
 # 2) 前端
 if (-not $SkipFrontend) {
