@@ -12,8 +12,10 @@
 //! Workspace::save(path)            校验后落盘（带备份）
 //! ```
 
+pub mod bundle;
 pub mod dto;
 pub mod workspace;
 
+pub use bundle::BundleInfo;
 pub use dto::*;
 pub use workspace::{default_game_dir, find_strings_dir, SaveOutcome, Workspace};

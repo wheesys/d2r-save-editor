@@ -510,17 +510,26 @@ fn cmd_validate(args: &[String]) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    let Some(ds_root) = d2r_data::find_loader_dataset(default_game_dir()) else {
-        eprintln!("找不到 loader 数据集，无法取物品尺寸");
+    // 物品尺寸：优先用随程序分发的数据包（用户机器上不用装游戏），loader 产物作为补充
+    let mut size_map = d2r_app::bundle::item_size_map();
+    if let Some(ds_root) = d2r_data::find_loader_dataset(default_game_dir()) {
+        let excel = ds_root.join("data").join("global").join("excel");
+        for (k, v) in d2r_data::build_size_map(&excel) {
+            size_map.insert(k, v);
+        }
+    }
+    if size_map.is_empty() {
+        eprintln!("没有可用的物品尺寸数据（数据包缺失且找不到游戏目录）");
         return ExitCode::from(1);
-    };
-    let excel = ds_root.join("data").join("global").join("excel");
-    let size_map = d2r_data::build_size_map(&excel);
+    }
     let strings = match default_strings_dir() {
         Some(dir) => d2r_data::Strings::from_dir(dir).unwrap_or_default(),
         None => d2r_data::Strings::default(),
     };
-    let mut tables = d2r_data::TableStore::new(excel.clone());
+    let mut tables = d2r_data::TableStore::empty();
+    if let Some(ds_root) = d2r_data::find_loader_dataset(default_game_dir()) {
+        tables.add_override_dir(ds_root.join("data").join("global").join("excel"));
+    }
     let class = format!("{:?}", file.save.character.class);
 
     // 分区：按 (模式, 存储页) 分到不同网格

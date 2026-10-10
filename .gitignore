@@ -8,6 +8,9 @@ samples/*
 !samples/DATA-MANIFEST.md
 !samples/manifest.json
 
+# 随程序分发的游戏数据包（暴雪版权数据，不入库；由 tools/make-bundle.py 生成）
+crates/app/data-bundle/
+
 # Rust 构建产物
 target/
 # 应用型项目应提交 Cargo.lock 以复现构建（此前模板里忽略它，已修正）

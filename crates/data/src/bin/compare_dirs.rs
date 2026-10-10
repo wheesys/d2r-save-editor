@@ -15,7 +15,8 @@ use std::process::ExitCode;
 
 use d2r_data::Table;
 
-const DEFAULT_OFFICIAL: &str = r"D:\code\d2r-save-editor\samples\game-data\excel";
+// 默认基准：随程序分发的数据包（也就是官方 CASC 的导出结果）
+const DEFAULT_OFFICIAL: &str = concat!(env!("CARGO_MANIFEST_DIR"), r"\..\app\data-bundle\excel");
 const DEFAULT_LOADER_BASE: &str = r"D:\Games\d2r92777\Diablo II Resurrected Infernal Edition\d2rloader\data\compiler\3.2.0\data\global\excel\base";
 const DEFAULT_LOADER_MERGED: &str = r"D:\Games\d2r92777\Diablo II Resurrected Infernal Edition\d2rloader\data\compiler\3.2.0\data\global\excel";
 

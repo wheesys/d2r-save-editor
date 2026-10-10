@@ -34,19 +34,14 @@ fn main() -> ExitCode {
     };
 
     // 尺寸表：从 loader 数据集读 Armor/Weapons/Misc 的 invwidth/invheight
-    let game = d2r_app::default_game_dir();
-    let mut size_map: BTreeMap<String, (i32, i32)> = BTreeMap::new();
-    if let Some(root) = d2r_data::find_loader_dataset(&game) {
+    let mut size_map: BTreeMap<String, (i32, i32)> = d2r_app::bundle::item_size_map()
+        .into_iter()
+        .map(|(k, (w, h))| (k, (w as i32, h as i32)))
+        .collect();
+    if let Some(root) = d2r_data::find_loader_dataset(d2r_app::default_game_dir()) {
         let excel = root.join("data").join("global").join("excel");
-        for name in ["Armor", "Weapons", "Misc"] {
-            let path = excel.join(format!("{name}.txt"));
-            let Ok(t) = d2r_data::Table::from_file(&path) else { continue };
-            for r in 0..t.len() {
-                let Some(code) = t.cell_nonempty(r, "code") else { continue };
-                let w = t.int(r, "invwidth").unwrap_or(1).max(1) as i32;
-                let h = t.int(r, "invheight").unwrap_or(1).max(1) as i32;
-                size_map.insert(code.to_string(), (w, h));
-            }
+        for (k, v) in d2r_data::build_size_map(&excel) {
+            size_map.insert(k, (v.0 as i32, v.1 as i32));
         }
     }
 

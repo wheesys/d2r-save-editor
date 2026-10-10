@@ -15,18 +15,47 @@ use crate::table::{DataError, Table};
 #[derive(Debug, Default)]
 pub struct TableStore {
     dir: Option<PathBuf>,
+    /// 覆盖目录（如用户自己装的 mod 数据表）：同名表优先从这里读。
+    override_dir: Option<PathBuf>,
+    /// 内存里的表（内嵌数据包用；不落盘）。
+    memory: HashMap<String, Table>,
     cache: HashMap<String, Option<Table>>,
 }
 
 impl TableStore {
     /// 指定表目录（例如 `<游戏>\d2rloader\data\compiler\3.2.0\data\global\excel`）。
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: Some(dir.into()), cache: HashMap::new() }
+        Self { dir: Some(dir.into()), override_dir: None, memory: HashMap::new(), cache: HashMap::new() }
     }
 
     /// 空集合（尚未绑定目录）。
     pub fn empty() -> Self {
-        Self { dir: None, cache: HashMap::new() }
+        Self { dir: None, override_dir: None, memory: HashMap::new(), cache: HashMap::new() }
+    }
+
+    /// 挂一个覆盖目录（一般是用户装 mod 后 loader 展开出来的表）：
+    /// 同名表以覆盖目录里的为准。
+    pub fn add_override_dir(&mut self, dir: impl Into<PathBuf>) {
+        self.override_dir = Some(dir.into());
+        self.cache.clear();
+    }
+
+    /// 覆盖目录。
+    pub fn override_dir(&self) -> Option<&Path> {
+        self.override_dir.as_deref()
+    }
+
+    /// 往内存里放一张表（内嵌数据包用，避免解包到磁盘）。
+    pub fn insert_memory(&mut self, name: &str, text: &str) {
+        let key = name.to_ascii_lowercase();
+        let t = Table::parse_tsv(key.clone(), format!("<bundle>/{name}"), text);
+        self.memory.insert(key.clone(), t);
+        self.cache.remove(&key);
+    }
+
+    /// 内存表数量。
+    pub fn memory_len(&self) -> usize {
+        self.memory.len()
     }
 
     /// 表目录。
@@ -48,37 +77,55 @@ impl TableStore {
 
     /// 目录下实际存在的表名列表（`.txt`）。
     pub fn available(&self) -> Vec<String> {
-        let Some(dir) = &self.dir else { return Vec::new() };
+        let mut names: Vec<String> = self.memory.keys().cloned().collect();
+        let Some(dir) = &self.dir else {
+            names.sort();
+            return names;
+        };
         let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
-        let mut names: Vec<String> = rd
-            .filter_map(|e| e.ok())
-            .filter_map(|e| {
-                let p = e.path();
-                if p.extension()?.to_str()?.eq_ignore_ascii_case("txt") {
-                    Some(p.file_stem()?.to_string_lossy().to_lowercase())
-                } else {
-                    None
-                }
-            })
-            .collect();
+        names.extend(rd.filter_map(|e| e.ok()).filter_map(|e| {
+            let p = e.path();
+            if p.extension()?.to_str()?.eq_ignore_ascii_case("txt") {
+                Some(p.file_stem()?.to_string_lossy().to_lowercase())
+            } else {
+                None
+            }
+        }));
         names.sort();
         names.dedup();
         names
     }
 
     fn load(&self, lowercase_name: &str) -> Option<Table> {
-        let dir = self.dir.as_ref()?;
-        let wanted = format!("{lowercase_name}.txt");
-        let rd = std::fs::read_dir(dir).ok()?;
-        for entry in rd.flatten() {
-            let path = entry.path();
-            let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else { continue };
-            if file_name.eq_ignore_ascii_case(&wanted) {
-                return Table::from_file(&path).ok();
+        // 覆盖目录优先
+        if let Some(dir) = self.override_dir.as_ref() {
+            if let Some(t) = load_from_dir(dir, lowercase_name) {
+                return Some(t);
             }
         }
-        None
+        // 磁盘目录
+        if let Some(dir) = self.dir.as_ref() {
+            if let Some(t) = load_from_dir(dir, lowercase_name) {
+                return Some(t);
+            }
+        }
+        // 内存表（内嵌数据包）
+        self.memory.get(lowercase_name).cloned()
     }
+}
+
+/// 从目录里按表名（大小写不敏感）读一张表。
+fn load_from_dir(dir: &Path, lowercase_name: &str) -> Option<Table> {
+    let wanted = format!("{lowercase_name}.txt");
+    let rd = std::fs::read_dir(dir).ok()?;
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else { continue };
+        if file_name.eq_ignore_ascii_case(&wanted) {
+            return Table::from_file(&path).ok();
+        }
+    }
+    None
 }
 
 /// 一个数据集：元信息 + 表集合 + 字符串表。

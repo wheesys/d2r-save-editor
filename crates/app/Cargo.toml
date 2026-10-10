@@ -7,8 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[features]
+default = ["bundled-data"]
+# 关闭后不内嵌数据包（体积更小，但要求用户机器上能找到游戏数据）
+bundled-data = []
+
 [dependencies]
 d2r-core = { workspace = true }
 d2r-data = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+include_dir = "0.7"

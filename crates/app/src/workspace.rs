@@ -27,8 +27,10 @@ pub struct SaveOutcome {
 pub struct Workspace {
     /// 游戏目录（用于定位数据集）。
     pub game_dir: PathBuf,
-    /// 数据集根目录。
+    /// mod 数据表目录（用户装了 mod 时用于覆盖同名表）。
     dataset_root: Option<PathBuf>,
+    /// 数据来源说明（展示给用户看）。
+    data_source: String,
     /// excel 表集合。
     tables: TableStore,
     /// 字符串表。
@@ -68,22 +70,67 @@ pub fn find_strings_dir() -> Option<PathBuf> {
 }
 
 impl Workspace {
-    /// 新建工作区并挂载数据集（数据集缺失不报错，只是名字显示会退化为代码）。
+    /// 新建工作区。
+    ///
+    /// **数据来源优先级**（目的是"用户机器上什么都不用找"）：
+    ///
+    /// 1. **随程序分发的数据包**（`crates/app/data-bundle`，构建期内嵌）——
+    ///    装了本程序就有数据，不需要游戏目录、不需要 CascView、不需要 D2RLoader；
+    /// 2. 本机游戏目录里的 loader 编译产物 —— 只有用户自己装了 mod 才需要，
+    ///    作为**补充**合并（mod 改了表时优先用游戏目录的版本）；
+    /// 3. 开发期仓库里的 `samples/game-data`（CLI 开发者方便）。
     pub fn new(game_dir: impl Into<PathBuf>) -> Self {
         let game_dir = game_dir.into();
+
+        // 1) 内置数据包
+        let mut source = "（无数据）".to_string();
         let mut tables = TableStore::empty();
-        let mut dataset_root = None;
-        if let Some(root) = d2r_data::find_loader_dataset(&game_dir) {
-            tables = TableStore::new(root.join("data").join("global").join("excel"));
-            dataset_root = Some(root);
+        let mut strings = Strings::default();
+
+        if crate::bundle::available() {
+            let n = crate::bundle::load_tables_into(&mut tables);
+            strings = crate::bundle::load_strings();
+            let info = crate::bundle::info();
+            source = format!(
+                "内置数据包（{} 张表 / {} 个字符串文件 / {:.1} MB）",
+                n,
+                info.string_files,
+                info.total_bytes as f64 / 1048576.0
+            );
         }
-        let strings = find_strings_dir()
-            .and_then(|d| Strings::from_dir(d).ok())
-            .unwrap_or_default();
-        Self { game_dir, dataset_root, tables, strings, lang: "zhCN".to_string(), session: None }
+
+        // 2) 用户自己装 mod 时的 loader 产物（覆盖同名表）
+        let mut mod_tables = None;
+        if let Some(root) = d2r_data::find_loader_dataset(&game_dir) {
+            let dir = root.join("data").join("global").join("excel");
+            mod_tables = Some(dir.clone());
+            tables.add_override_dir(dir);
+            source.push_str(&format!("；外加 mod 数据表（{}）", root.display()));
+        }
+
+        // 3) 开发期本机导出（仓库内）
+        if strings.is_empty() {
+            if let Some(d) = find_strings_dir() {
+                if let Ok(s) = Strings::from_dir(&d) {
+                    let n = s.len();
+                    strings.merge(s);
+                    source.push_str(&format!("；字符串来自 {d:?}（{n} 条）"));
+                }
+            }
+        }
+
+        Self {
+            game_dir,
+            dataset_root: mod_tables,
+            data_source: source,
+            tables,
+            strings,
+            lang: "zhCN".to_string(),
+            session: None,
+        }
     }
 
-    /// 挂载官方字符串表目录（界面里可让用户选）。
+    /// 挂载官方字符串表目录（界面里可让用户选；合并进已有字符串）。
     pub fn set_strings_dir(&mut self, dir: impl AsRef<Path>) -> Result<usize, AppError> {
         let s = Strings::from_dir(dir).map_err(|e| AppError::new("strings", e.to_string()))?;
         let n = s.len();
@@ -94,15 +141,16 @@ impl Workspace {
     /// 数据集信息。
     pub fn dataset_info(&self) -> DatasetInfo {
         DatasetInfo {
-            root: self
-                .dataset_root
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|| "(未找到数据集)".into()),
+            root: self.data_source.clone(),
             tables: self.tables.available().len(),
             strings: self.strings.len(),
             languages: self.strings.languages().to_vec(),
         }
+    }
+
+    /// 数据包概览（界面可显示"内置数据版本"）。
+    pub fn bundle_info(&self) -> crate::bundle::BundleInfo {
+        crate::bundle::info()
     }
 
     /// 打开存档。
