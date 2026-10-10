@@ -39,13 +39,26 @@ cargo run -p d2r-cli -- dataset
 
 | 里程碑 | 状态 |
 |---|---|
-| 1 数据集加载器 | 🟡 已能读 loader 展开的 excel txt（88 张，含原版基准 86 张）并列出 mod 改动表；字符串表待 CASC 导出 |
-| 2 `.d2s` 读入→写出逐字节一致 | 🟡 8 个样本中 6 个逐字节一致，2 个已知问题见 `docs/next-steps-materials.md` §3.5 |
-| 3 容器与物品摆放校验 | ⬜ 待开始 |
+| 1 数据集加载器 | 🟢 excel 表（loader 展开的 88 张 + 官方 CASC 导出 91 张）、字符串表（24,179 条 / 13 种语言）、mod 描述；官方表与本机数据已交叉比对 |
+| 2 `.d2s` 读入→写出逐字节一致 | 🟢 8 个样本中 **7 个逐字节一致**（含 `.d2i`）；剩 1 个已知条目段编码差异，见 `docs/next-steps-materials.md` §3.10 |
+| 3 容器与物品摆放校验 | 🟢 区域级重叠 / 装备位重复 / 未知物品代码；发现"不能用原版表判越界"与"合成箱局部坐标"两条坑（§3.9） |
 | 4 属性/技能/任务/传送点编辑 | ⬜ 待开始 |
 | 5 物品编辑与导入 | ⬜ 待开始 |
 | 6 佣兵装备 | ⬜ 待开始 |
 | 7 Tauri 界面整合 | ⬜ 待开始 |
+
+已能用的命令：
+
+```powershell
+cargo run -p d2r-cli -- roundtrip                       # 往返一致性（写路径门槛）
+cargo run -p d2r-cli -- inspect <存档> [--json]          # 头部/角色/物品（中文名）
+cargo run -p d2r-cli -- validate <文件.d2s>              # 容器与摆放校验
+cargo run -p d2r-cli -- dataset                          # 数据集与字符串表
+cargo run -p d2r-cli -- strings [rvl amu]                # 字符串表抽查
+cargo run -p d2r-data --bin compare-dirs                 # 官方表 vs loader base vs merged
+cargo run -p d2r-core --bin rewrite-save -- <原> <新>     # 读入再写出（配合 cmp-bytes 定位差异）
+cargo run -p d2r-core --bin cmp-bytes -- <原> <新>        # 字节级差异定位
+```
 
 ## 功能目标
 
