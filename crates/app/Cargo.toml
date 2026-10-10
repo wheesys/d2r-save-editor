@@ -17,4 +17,9 @@ d2r-core = { workspace = true }
 d2r-data = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-include_dir = "0.7"
+# 运行时解压内嵌数据（构建期用 flate2 压缩，见 build.rs）
+flate2 = "1"
+
+[build-dependencies]
+# 构建期压缩数据包（文本数据压到约 18%）
+flate2 = "1"

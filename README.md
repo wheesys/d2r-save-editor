@@ -36,11 +36,18 @@ docs/     调研与开发记录
 ## 发布打包
 
 ```powershell
-pwsh -File tools/package.ps1        # → dist/d2r-save-editor-<版本>-win-x64.zip
+pwsh -File tools/package.ps1                  # → dist/D2RSaveEditor-<版本>-win-x64.exe
+pwsh -File tools/package.ps1 -AlsoZip         # 额外再打一个 zip（含说明文件）
 ```
 
-流程：准备本地数据 → 构建前端 → release 构建（数据内嵌进 exe）→ 组装 → 压缩。
+产物是**一个自足的 exe**：不需要安装、不需要额外 DLL、不需要游戏或任何工具。
+
+流程：准备本地数据 → 构建前端 → release 构建 → 拷出单文件。
+
+数据在构建期**先压缩再内嵌**（文本数据能压到约 18%），所以 exe 体积远小于"数据原样内嵌"。
 release 构建在缺少本地数据时会**直接失败**，避免发出打开就没数据的包。
+
+> 提醒：exe 内含游戏数据，请只在自己的范围内分发，不要上传到公开仓库或公开 Release。
 
 ## 开发
 

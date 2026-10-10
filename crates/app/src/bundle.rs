@@ -16,66 +16,51 @@
 //! 显式指定的目录  >  随程序分发的数据包  >  本机游戏目录里的 loader 产物
 //! ```
 
-use include_dir::{include_dir, Dir};
-
-/// 内嵌的数据包目录。缺失时用 `data-bundle-stub`（只有一个 `.keep`）占位。
+/// 构建期生成的嵌入数据（预压缩，运行时解压）。见 `build.rs`。
 #[cfg(feature = "bundled-data")]
-static BUNDLE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/data-bundle");
+mod embedded {
+    include!(concat!(env!("OUT_DIR"), "/bundle_data.rs"));
+}
 #[cfg(not(feature = "bundled-data"))]
-static BUNDLE: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/data-bundle-stub");
-
-/// 数据包清单（`BUNDLE.json`）解析结果。
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct BundleManifest {
-    /// 清单结构版本。
-    pub schema: u32,
-    /// 说明。
-    #[serde(default)]
-    pub note: String,
-    /// excel 表数量。
-    pub excel_files: usize,
-    /// 字符串表数量。
-    pub string_files: usize,
-    /// 总字节数。
-    pub total_bytes: u64,
-    /// 逐文件记录。
-    #[serde(default)]
-    pub files: Vec<BundleFile>,
+mod embedded {
+    pub const AVAILABLE: bool = false;
+    pub static FILES: &[(&str, &[u8], usize)] = &[];
 }
 
-/// 数据包里的一个文件。
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct BundleFile {
-    /// 包内相对路径。
-    pub path: String,
-    /// 字节数。
-    pub size: u64,
-    /// sha256。
-    pub sha256: String,
-    /// 来源（仓库内路径）。
-    #[serde(default)]
-    pub source: String,
-}
-
-/// 数据包是否可用（有 excel 表才算可用）。
+/// 数据包是否可用（内嵌了表才算可用）。
 pub fn available() -> bool {
-    BUNDLE.get_file("excel/inventory.txt").is_some()
+    cfg!(feature = "bundled-data") && embedded::AVAILABLE && !embedded::FILES.is_empty()
 }
 
-/// 读取数据包清单；不可用时返回 `None`。
-pub fn manifest() -> Option<BundleManifest> {
-    let f = BUNDLE.get_file("BUNDLE.json")?;
-    serde_json::from_slice(f.contents()).ok()
+/// 解压一个内嵌文件。
+fn unpack(compressed: &[u8], raw_len: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut out = Vec::with_capacity(raw_len);
+    flate2::read::ZlibDecoder::new(compressed).read_to_end(&mut out).ok()?;
+    Some(out)
+}
+
+/// 解压成文本。
+fn unpack_text(compressed: &[u8], raw_len: usize) -> Option<String> {
+    Some(String::from_utf8_lossy(&unpack(compressed, raw_len)?).to_string())
+}
+
+/// 按包内相对路径取文本（路径大小写不敏感）。
+fn text_of(rel: &str) -> Option<String> {
+    let wanted = rel.to_ascii_lowercase();
+    embedded::FILES
+        .iter()
+        .find(|(name, _, _)| name.to_ascii_lowercase() == wanted)
+        .and_then(|(_, data, len)| unpack_text(data, *len))
 }
 
 /// 数据包里的 excel 表名（小写，不含扩展名）。
 pub fn excel_tables() -> Vec<String> {
-    let Some(dir) = BUNDLE.get_dir("excel") else { return Vec::new() };
-    let mut names: Vec<String> = dir
-        .files()
-        .filter_map(|f| {
-            let name = f.path().file_name()?.to_str()?;
-            let stem = name.strip_suffix(".txt")?;
+    let mut names: Vec<String> = embedded::FILES
+        .iter()
+        .filter_map(|(name, _, _)| {
+            let rest = name.strip_prefix("excel/")?;
+            let stem = rest.strip_suffix(".txt")?;
             Some(stem.to_ascii_lowercase())
         })
         .collect();
@@ -86,25 +71,16 @@ pub fn excel_tables() -> Vec<String> {
 
 /// 按表名读取 excel 表内容（大小写不敏感；找不到返回 `None`）。
 pub fn excel_table(name: &str) -> Option<String> {
-    let wanted = format!("{}.txt", name.to_ascii_lowercase());
-    let dir = BUNDLE.get_dir("excel")?;
-    for f in dir.files() {
-        let file_name = f.path().file_name()?.to_str()?;
-        if file_name.to_ascii_lowercase() == wanted {
-            return Some(String::from_utf8_lossy(f.contents()).to_string());
-        }
-    }
-    None
+    text_of(&format!("excel/{name}.txt"))
 }
 
-/// 字符串表的全部内容（文件名 → 文本）。
+/// 文本表的全部内容（文件名 → 文本）。
 pub fn string_files() -> Vec<(String, String)> {
-    let Some(dir) = BUNDLE.get_dir("strings") else { return Vec::new() };
-    let mut out: Vec<(String, String)> = dir
-        .files()
-        .filter_map(|f| {
-            let name = f.path().file_name()?.to_str()?.to_string();
-            Some((name, String::from_utf8_lossy(f.contents()).to_string()))
+    let mut out: Vec<(String, String)> = embedded::FILES
+        .iter()
+        .filter_map(|(name, data, len)| {
+            let file = name.strip_prefix("strings/")?.to_string();
+            Some((file, unpack_text(data, *len)?))
         })
         .collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -165,12 +141,11 @@ pub struct BundleInfo {
 
 /// 概览。
 pub fn info() -> BundleInfo {
-    let m = manifest();
     BundleInfo {
         available: available(),
         excel_tables: excel_tables().len(),
         string_files: string_files().len(),
-        total_bytes: m.map(|m| m.total_bytes).unwrap_or(0),
+        total_bytes: embedded::FILES.iter().map(|(_, _, len)| *len as u64).sum(),
     }
 }
 

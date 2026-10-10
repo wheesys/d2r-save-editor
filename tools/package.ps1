@@ -38,7 +38,8 @@ param(
     [switch]$SkipBundle,
     [switch]$KeepBundle,
     [switch]$SkipFrontend,
-    [string]$Version
+    [string]$Version,
+    [switch]$AlsoZip
 )
 
 $ErrorActionPreference = 'Stop'
@@ -130,40 +131,39 @@ if (-not (Test-Path $exe)) { throw "找不到产物：$exe" }
 $exeMb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
 Ok "d2r-desktop.exe（$exeMb MB，数据已内嵌）"
 
-# 4) 组装
-Step '组装发布目录'
-$name = "d2r-save-editor-$Version-win-x64"
-$stage = Join-Path $dist $name
-if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-New-Item -ItemType Directory -Force -Path $stage | Out-Null
-Copy-Item $exe (Join-Path $stage 'd2r-save-editor.exe')
-foreach ($doc in 'README.md', 'LICENSE') {
-    $src = Join-Path $repo $doc
-    if (Test-Path $src) { Copy-Item $src $stage }
-}
+# 4) 产出单文件 exe（数据与界面资源都在里面，配套一份说明）
+Step '产出单文件 exe'
+$outName = "D2RSaveEditor-$Version-win-x64.exe"
+$outExe = Join-Path $dist $outName
+Copy-Item $exe $outExe -Force
+$outMb = [math]::Round((Get-Item $outExe).Length / 1MB, 1)
+Ok "$outName（$outMb MB，单文件，数据已内嵌）"
+
 $usage = @"
-D2R 存档修改器 v$Version（Windows x64）
-=====================================
+D2R 存档修改器 v$Version（Windows x64 单文件版）
+==============================================
 
 怎么用
 ------
-1. 双击 d2r-save-editor.exe
+1. 双击 $outName（就这一个文件，不需要安装，也不需要额外的 DLL）
 2. 点「打开存档…」，选你的角色存档（.d2s）或共享储物箱（.d2i）
    - 默认位置：%USERPROFILE%\Saved Games\Diablo II Resurrected\
 3. 改完点「保存」。保存前会自动校验，通过才落盘，并给原文件留一份 .bak 备份
 
 不需要装什么
 ------------
-本程序已内嵌运行所需的数据表与文本表：
+程序已经把运行所需的数据表与文本表内嵌在 exe 里：
 - 不需要装《暗黑破坏神2：重制版》
 - 不需要装任何解包工具
-- 不需要装 mod 加载器（D2RLoader）
+- 不需要装 mod 加载器
 除你要修改的存档文件外，不需要在本机找任何东西。
 
 如果你自己装了 mod（数据表被改过）
 ----------------------------------
 程序启动时会自动扫描游戏目录里的 mod 数据表并覆盖同名表；
 找不到也不影响，用的就是内置的原版数据。
+背包/箱子/合成箱的尺寸与「佣兵全装备」这类 mod 改动存档里读不出来，
+界面会给出推断结果并让你勾选确认。
 
 兼容性
 ------
@@ -176,17 +176,29 @@ D2R 存档修改器 v$Version（Windows x64）
 ----
 https://github.com/wheesys/d2r-save-editor
 "@
-Set-Content -Path (Join-Path $stage '使用说明.txt') -Value $usage -Encoding UTF8
-Ok "已组装 $name"
+$usagePath = Join-Path $dist "使用说明-$Version.txt"
+Set-Content -Path $usagePath -Value $usage -Encoding UTF8
+Ok "使用说明-$Version.txt"
 
-# 5) 压缩
-Step '压缩'
-$zip = Join-Path $dist "$name.zip"
-if (Test-Path $zip) { Remove-Item $zip -Force }
-Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
-$zipMb = [math]::Round((Get-Item $zip).Length / 1MB, 1)
-Ok "$zip（$zipMb MB）"
+if ($AlsoZip) {
+    Step '另外打一个 zip（含 exe 与说明）'
+    $stage = Join-Path $dist "d2r-save-editor-$Version-win-x64"
+    if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $stage | Out-Null
+    Copy-Item $outExe (Join-Path $stage 'd2r-save-editor.exe')
+    Copy-Item $usagePath $stage
+    foreach ($doc in 'README.md', 'LICENSE') {
+        $src = Join-Path $repo $doc
+        if (Test-Path $src) { Copy-Item $src $stage }
+    }
+    $zip = Join-Path $dist "d2r-save-editor-$Version-win-x64.zip"
+    if (Test-Path $zip) { Remove-Item $zip -Force }
+    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
+    Ok "$([System.IO.Path]::GetFileName($zip))（$([math]::Round((Get-Item $zip).Length/1MB,1)) MB）"
+}
 
 Write-Host ''
-Write-Host "完成：$zip" -ForegroundColor Green
-Write-Host "内含：d2r-save-editor.exe（$exeMb MB，数据已内嵌）、使用说明.txt、README.md、LICENSE" -ForegroundColor DarkGray
+Write-Host "完成：$outExe" -ForegroundColor Green
+Write-Host "单文件 exe（$outMb MB，内含全部数据与界面资源）；配套说明：$usagePath" -ForegroundColor DarkGray
+Write-Host ''
+Write-Host '提醒：exe 内含游戏数据，请只在你自己的范围内分发，不要上传到公开仓库或公开 Release。' -ForegroundColor Yellow
