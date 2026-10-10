@@ -45,13 +45,17 @@ pub fn item_icons() -> Vec<(String, String)> {
     };
     let mut out = Vec::with_capacity(map.lines().count());
     for line in map.lines() {
-        let Some((code, file)) = line.split_once('\t') else { continue };
+        let Some((code, file)) = line.split_once('\t') else {
+            continue;
+        };
         let code = code.trim();
         let file = file.trim();
         if code.is_empty() || file.is_empty() {
             continue;
         }
-        let Some(bytes) = raw_of(&format!("icons/{file}")) else { continue };
+        let Some(bytes) = raw_of(&format!("icons/{file}")) else {
+            continue;
+        };
         out.push((code.to_string(), png_data_url(&bytes)));
     }
     out
@@ -87,8 +91,16 @@ fn base64_encode(input: &[u8]) -> String {
         let triple = (b0 << 16) | (b1 << 8) | b2;
         out.push(TABLE[(triple >> 18) as usize & 63] as char);
         out.push(TABLE[(triple >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { TABLE[(triple >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[triple as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            TABLE[(triple >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[triple as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -194,7 +206,11 @@ pub fn item_size_map() -> std::collections::BTreeMap<String, (u32, u32)> {
     map
 }
 /// 数据包概览（给界面/CLI 显示）。
+///
+/// 注意：必须 `camelCase` 序列化——界面按 `totalBytes` / `excelTables` 读，
+/// 少了这个属性会让界面拿到 `undefined`（曾经显示成 `NaN MB`）。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct BundleInfo {
     /// 是否可用。
     pub available: bool,
@@ -202,6 +218,8 @@ pub struct BundleInfo {
     pub excel_tables: usize,
     /// 字符串表文件数。
     pub string_files: usize,
+    /// 图标数量。
+    pub icons: usize,
     /// 清单里的总字节数。
     pub total_bytes: u64,
 }
@@ -212,6 +230,10 @@ pub fn info() -> BundleInfo {
         available: available(),
         excel_tables: excel_tables().len(),
         string_files: string_files().len(),
+        icons: embedded::FILES
+            .iter()
+            .filter(|(name, _, _)| name.starts_with("icons/") && name.ends_with(".png"))
+            .count(),
         total_bytes: embedded::FILES.iter().map(|(_, _, len)| *len as u64).sum(),
     }
 }
@@ -258,7 +280,9 @@ mod tests {
         assert!(icons.len() > 250, "图标数量偏少：{}", icons.len());
         assert!(icons.iter().any(|(c, _)| c == "hp1"), "应有治疗药水的图标");
         assert!(
-            icons.iter().all(|(_, url)| url.starts_with("data:image/png;base64,")),
+            icons
+                .iter()
+                .all(|(_, url)| url.starts_with("data:image/png;base64,")),
             "图标应是 PNG data URL"
         );
         // 编码结果必须能解回 PNG（否则界面拿到的是坏图）

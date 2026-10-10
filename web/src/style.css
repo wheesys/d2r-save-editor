@@ -200,3 +200,69 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
   align-self: center;
   pointer-events: none;
 }
+/* ===== 页签 ===== */
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 8px 16px;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 14px;
+}
+.tab:hover { background: var(--panel-2); }
+.tab.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: 600; }
+.tab-panel { display: block; }
+.tab-panel.hidden { display: none; }
+
+/* ===== 弹窗 ===== */
+.modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; }
+.modal.hidden { display: none; }
+.modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
+.modal-body {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px 18px;
+  width: min(880px, 92vw);
+  max-height: 88vh;
+  overflow: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.modal-head h2 { margin: 0; font-size: 16px; }
+
+/* 物品块上的图标 */
+.blk-icon {
+  image-rendering: pixelated;
+  max-width: 100%;
+  max-height: calc(100% - 12px);
+  object-fit: contain;
+  align-self: center;
+  pointer-events: none;
+}
+
+/* 小站列表 */
+.waypoints { display: flex; flex-wrap: wrap; gap: 6px; }
+.wp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 10px;
+  background: var(--panel-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.wp.on { border-color: var(--accent); }
+.wp input { margin: 0; }

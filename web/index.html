@@ -18,109 +18,156 @@
       <div id="dataset" class="muted"></div>
     </header>
 
+    <!-- 分页：把原来一整条长页面拆成 5 个页签 -->
+    <nav id="tabs" class="tabs hidden">
+      <button class="tab active" data-tab="char">角色</button>
+      <button class="tab" data-tab="skills">技能</button>
+      <button class="tab" data-tab="quests">任务</button>
+      <button class="tab" data-tab="items">物品栏</button>
+      <button class="tab" data-tab="merc">佣兵</button>
+      <button class="tab" data-tab="settings">设置</button>
+    </nav>
+
     <main>
-      <section id="overview" class="card hidden">
-        <h2>存档</h2>
-        <table id="save-info"></table>
+      <!-- ===== 角色 ===== -->
+      <section id="tab-char" class="tab-panel">
+        <section id="overview" class="card hidden">
+          <h2>存档</h2>
+          <table id="save-info"></table>
+        </section>
+
+        <section id="char-section" class="card hidden">
+          <h2>角色</h2>
+          <div class="grid">
+            <label>等级 <input id="f-level" type="number" min="1" max="99" /></label>
+            <label>力量 <input id="f-strength" type="number" min="0" /></label>
+            <label>敏捷 <input id="f-dexterity" type="number" min="0" /></label>
+            <label>体力 <input id="f-vitality" type="number" min="0" /></label>
+            <label>精力 <input id="f-energy" type="number" min="0" /></label>
+            <label>属性点 <input id="f-stat-points" type="number" min="0" /></label>
+            <label>技能点 <input id="f-skill-points" type="number" min="0" /></label>
+            <label>身上金币 <input id="f-gold" type="number" min="0" /></label>
+            <label>储物箱金币 <input id="f-stash-gold" type="number" min="0" /></label>
+            <label>生命 <input id="f-hp" type="number" min="0" /></label>
+            <label>法力 <input id="f-mana" type="number" min="0" /></label>
+            <label>体力值 <input id="f-stamina" type="number" min="0" /></label>
+            <label>经验 <input id="f-experience" type="number" min="0" /></label>
+          </div>
+          <p class="muted" id="char-readonly"></p>
+          <div class="actions">
+            <button id="btn-apply-char" class="primary">应用角色修改</button>
+          </div>
+        </section>
       </section>
 
-      <section id="char-section" class="card hidden">
-        <h2>角色</h2>
-        <div class="grid">
-          <label>等级 <input id="f-level" type="number" min="1" max="99" /></label>
-          <label>力量 <input id="f-strength" type="number" min="0" /></label>
-          <label>敏捷 <input id="f-dexterity" type="number" min="0" /></label>
-          <label>体力 <input id="f-vitality" type="number" min="0" /></label>
-          <label>精力 <input id="f-energy" type="number" min="0" /></label>
-          <label>属性点 <input id="f-stat-points" type="number" min="0" /></label>
-          <label>技能点 <input id="f-skill-points" type="number" min="0" /></label>
-          <label>身上金币 <input id="f-gold" type="number" min="0" /></label>
-          <label>储物箱金币 <input id="f-stash-gold" type="number" min="0" /></label>
+      <!-- ===== 技能 ===== -->
+      <section id="tab-skills" class="tab-panel hidden">
+        <section id="skills-section" class="card hidden">
+          <h2>技能</h2>
+          <p class="muted">只列出已加点的技能；「显示全部」可展开该职业全部技能槽位。</p>
+          <label class="inline"><input type="checkbox" id="show-all-skills" /> 显示全部</label>
+          <div id="skills" class="skills"></div>
+          <div class="actions"><button id="btn-apply-skills" class="primary">应用技能修改</button></div>
+        </section>
+      </section>
+
+      <!-- ===== 任务 / 传送点 ===== -->
+      <section id="tab-quests" class="tab-panel hidden">
+        <section id="waypoints-section" class="card hidden">
+          <h2>传送点（小站）</h2>
+          <p class="muted">勾选表示该小站已开通；显示的是小站名字，不是编号。</p>
+          <div id="waypoints" class="waypoints"></div>
+          <div class="actions">
+            <button id="btn-waypoints-all" class="primary">解锁全部难度传送点</button>
+          </div>
+        </section>
+
+        <section id="quests-section" class="card hidden">
+          <h2>任务</h2>
+          <p class="muted">任务进度编辑尚未接入：先展示存档里读到的各幕进度标记。</p>
+          <div id="quests" class="quests"></div>
+        </section>
+      </section>
+
+      <!-- ===== 物品栏 ===== -->
+      <section id="tab-items" class="tab-panel hidden">
+        <section id="inventory-section" class="card hidden">
+          <h2>容器</h2>
+          <p class="muted">
+            物品块的大小就是它占的格子数。<strong>点物品块</strong>弹出属性窗口，
+            <strong>拖动物品块</strong>可换格子或换容器（写盘前会做完整校验）。
+            容器尺寸来自「设置」页，越界物品会单独列出而不是隐藏。
+          </p>
+          <div id="inventory" class="inventory"></div>
+        </section>
+
+        <section id="items-section" class="card hidden">
+          <h2>物品列表</h2>
+          <div id="items-summary" class="muted"></div>
+          <div id="items-stats" class="muted"></div>
+          <p class="muted">逐条改「耐久 / 数量 / 孔数」后点「应用物品修改」；点某一行打开属性窗口。</p>
+          <div class="actions">
+            <button id="btn-apply-items" class="primary">应用物品修改</button>
+            <button id="btn-import-item">导入物品（蓝图 JSON）…</button>
+          </div>
+          <div class="table-wrap"><table id="items"></table></div>
+        </section>
+      </section>
+
+      <!-- ===== 佣兵 ===== -->
+      <section id="tab-merc" class="tab-panel hidden">
+        <section id="merc-section" class="card hidden">
+          <h2>佣兵</h2>
+          <p class="muted">
+            佣兵装备读自存档的佣兵段；「佣兵全装备」这类 mod 改动存档里没有标记，
+            所以在「设置」页勾选。
+          </p>
+          <div id="merc" class="inventory"></div>
+        </section>
+      </section>
+
+      <!-- ===== 设置 ===== -->
+      <section id="tab-settings" class="tab-panel hidden">
+        <section id="layout-section" class="card hidden">
+          <h2>容器布局设置</h2>
+          <p class="muted">
+            背包/箱子大小与「佣兵全装备」是 mod 改动，<strong>存档里读不出来</strong>。
+            下面是根据存档坐标推断的结果与需要你确认的项。
+          </p>
+          <div id="layout-questions" class="questions"></div>
+          <div class="grid">
+            <label>背包列数 <input id="l-inv-cols" type="number" min="1" max="64" /></label>
+            <label>背包行数 <input id="l-inv-rows" type="number" min="1" max="64" /></label>
+            <label>合成箱列数 <input id="l-cube-cols" type="number" min="1" max="64" /></label>
+            <label>合成箱行数 <input id="l-cube-rows" type="number" min="1" max="64" /></label>
+            <label>箱子列数 <input id="l-stash-cols" type="number" min="1" max="64" /></label>
+            <label>箱子行数 <input id="l-stash-rows" type="number" min="1" max="64" /></label>
+            <label class="inline"><input type="checkbox" id="l-merc" /> 佣兵全装备（mod）</label>
+          </div>
+          <div class="actions">
+            <button id="btn-apply-layout" class="primary">确认并应用布局</button>
+            <button id="btn-check-bounds">按此布局检查越界</button>
+          </div>
+          <div id="bounds-result" class="muted"></div>
+        </section>
+      </section>
+    </main>
+
+    <!-- 物品属性弹窗：点物品块/行时打开，不再往页面下面堆内容 -->
+    <div id="item-modal" class="modal hidden">
+      <div class="modal-backdrop" data-close-modal></div>
+      <div class="modal-body">
+        <div class="modal-head">
+          <h2 id="detail-title">物品属性</h2>
+          <button id="btn-close-modal" class="mini" data-close-modal>关闭 ✕</button>
         </div>
-        <p class="muted" id="char-readonly"></p>
-        <div class="actions">
-          <button id="btn-apply-char">应用角色修改</button>
-          <button id="btn-waypoints-all">解锁全部难度传送点</button>
-        </div>
-      </section>
-
-      <section id="skills-section" class="card hidden">
-        <h2>技能</h2>
-        <p class="muted">只列出已加点的技能；「显示全部」可展开该职业全部技能槽位。</p>
-        <label class="inline"><input type="checkbox" id="show-all-skills" /> 显示全部</label>
-        <div id="skills" class="skills"></div>
-        <div class="actions"><button id="btn-apply-skills">应用技能修改</button></div>
-      </section>
-
-      <section id="waypoints-section" class="card hidden">
-        <h2>传送点</h2>
-        <div id="waypoints" class="waypoints"></div>
-      </section>
-
-      <section id="layout-section" class="card hidden">
-        <h2>容器布局设置</h2>
-        <p class="muted">
-          背包/箱子大小与「佣兵全装备」是 mod 改动，<strong>存档里读不出来</strong>。
-          下面是根据存档坐标推断的结果与需要你确认的项。
-        </p>
-        <div id="layout-questions" class="questions"></div>
-        <div class="grid">
-          <label>背包列数 <input id="l-inv-cols" type="number" min="1" max="64" /></label>
-          <label>背包行数 <input id="l-inv-rows" type="number" min="1" max="64" /></label>
-          <label>合成箱列数 <input id="l-cube-cols" type="number" min="1" max="64" /></label>
-          <label>合成箱行数 <input id="l-cube-rows" type="number" min="1" max="64" /></label>
-          <label>箱子列数 <input id="l-stash-cols" type="number" min="1" max="64" /></label>
-          <label>箱子行数 <input id="l-stash-rows" type="number" min="1" max="64" /></label>
-          <label class="inline"><input type="checkbox" id="l-merc" /> 佣兵全装备（mod）</label>
-        </div>
-        <div class="actions">
-          <button id="btn-apply-layout" class="primary">确认并应用布局</button>
-          <button id="btn-check-bounds">按此布局检查越界</button>
-        </div>
-        <div id="bounds-result" class="muted"></div>
-      </section>
-      <section id="items-section" class="card hidden">
-        <h2>物品</h2>
-        <div id="items-summary" class="muted"></div>
-        <div id="items-stats" class="muted"></div>
-        <p class="muted">
-          改「耐久」「数量」「孔数」后点下面的按钮应用；<strong>点某一行</strong>可以编辑该物品的属性。
-        </p>
-        <div class="actions">
-          <button id="btn-apply-items">应用物品修改</button>
-          <button id="btn-import-item">导入物品（蓝图 JSON）…</button>
-          <button id="btn-export-item">导出选中物品</button>
-        </div>
-        <div class="table-wrap"><table id="items"></table></div>
-      </section>
-
-      <section id="inventory-section" class="card hidden">
-        <h2>容器视图</h2>
-        <p class="muted">
-          按容器网格渲染，物品块的大小就是它占的格子数。<strong>点物品块</strong>在下方编辑属性，
-          <strong>拖动物品块</strong>可以换格子或换容器（写盘前会做完整校验）。
-          容器尺寸来自上面「容器布局设置」，越界的物品会单独列出而不是隐藏。
-        </p>
-        <div id="inventory" class="inventory"></div>
-      </section>
-
-      <section id="item-detail-section" class="card hidden">
-        <h2>物品属性：<span id="detail-title">—</span></h2>
         <div id="detail-summary" class="muted"></div>
 
         <div class="grid">
-          <label>孔数
-            <input id="d-sockets" type="number" min="0" max="7" />
-          </label>
-          <label>当前耐久
-            <input id="d-durability" type="number" min="0" />
-          </label>
-          <label>堆叠数量
-            <input id="d-quantity" type="number" min="1" max="511" />
-          </label>
-          <label>防御
-            <input id="d-defense" type="number" min="0" max="65535" />
-          </label>
+          <label>孔数 <input id="d-sockets" type="number" min="0" max="7" /></label>
+          <label>当前耐久 <input id="d-durability" type="number" min="0" /></label>
+          <label>堆叠数量 <input id="d-quantity" type="number" min="1" max="511" /></label>
+          <label>防御 <input id="d-defense" type="number" min="0" max="65535" /></label>
         </div>
 
         <h3>属性（<span id="stat-count">0</span> 条）</h3>
@@ -128,18 +175,18 @@
           值必须落在游戏能精确存储的范围内：<strong>步长 &gt; 1 的属性，值要是步长的倍数</strong>，
           否则写盘会被截断，程序会直接拒绝。
         </p>
-        <div class="table-wrap">
-          <table id="item-stats"></table>
-        </div>
+        <div class="table-wrap"><table id="item-stats"></table></div>
+
         <div class="actions">
           <select id="add-stat-select"></select>
           <input id="add-stat-value" type="number" value="1" />
           <button id="btn-add-stat">添加属性</button>
-          <button id="btn-apply-detail" class="primary">应用该物品的修改</button>
+          <button id="btn-export-item">导出为蓝图</button>
+          <button id="btn-apply-detail" class="primary">应用修改</button>
         </div>
         <div id="detail-result" class="muted"></div>
-      </section>
-    </main>
+      </div>
+    </div>
 
     <div id="toast" class="toast hidden"></div>
     <script type="module" src="/src/main.ts"></script>

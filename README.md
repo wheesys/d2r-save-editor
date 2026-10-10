@@ -81,6 +81,7 @@ cargo run -p d2r-cli -- edit   <存档> --set '<JSON>'     # 编辑并保存（�
 cargo run -p d2r-cli -- items  <存档> [--filter 关键字]  # 物品清单/明细（--json）
 cargo run -p d2r-cli -- item   <存档> --index N           # 单件物品明细（属性带中文名/步长）
 cargo run -p d2r-cli --bin grid-probe -- <存档> [--inv 16x8]  # 容器网格布局校验（物品落在哪一格/是否越界）
+node tools/render-check.mjs                # 界面渲染逻辑校验（不开窗口，容器/位置/越界/图标）
 cargo run -p d2r-cli -- stats  [--filter 关键字] [--all]  # 属性 ID ↔ 中文名对照（步长/参数位）
 cargo run -p d2r-cli -- export-items <存档> [--index N] --out bp.json   # 导出物品蓝图
 cargo run -p d2r-cli -- import-item  <存档> --blueprint bp.json --template N  # 导入物品

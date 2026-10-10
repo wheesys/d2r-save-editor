@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import { bindGridDrag, renderInventory } from "./inventory";
+import { bindGridDrag, escapeAttr, escapeHtml, renderInventory, setItemIcons } from "./inventory";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import {
@@ -14,6 +14,7 @@ import {
   type BundleInfo,
   type ItemDetailDto,
   type StatCatalogEntry,
+  type MercenaryItem,
   type LayoutSettings,
   type LayoutHints,
   type BoundsIssue,
@@ -53,10 +54,31 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   return invoke<T>(cmd, args);
 }
 
+/** 数据包信息缓存（数据集那行要显示它的体积） */
+let bundleInfo: BundleInfo | null = null;
+
+/** 取数据包信息（后端缺失该命令时返回 null） */
+async function loadBundleInfo(): Promise<BundleInfo | null> {
+  try {
+    return await call<BundleInfo>("bundle_info");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 整行重建数据集那行。
+ *
+ * 不要改成 `+=` 追加：`loadAll()` 会在刷新/保存后被反复调用，
+ * 追加会让这一行越贴越长。
+ */
 async function refreshDataset() {
   const info = await call<DatasetInfo>("dataset_info");
+  // 数据来源那段由后端的 data_source 提供（含内置数据包的张数/字符串数/图标数/体积）。
+  // 前端不要再拼一遍"内置数据包 xx MB"——那样这行会出现两遍同名信息。
+  const extra = bundleInfo?.available ? `｜图标 ${bundleInfo.icons} 张` : "";
   $("#dataset").textContent =
-    `数据集：${info.tables} 张表｜字符串表 ${info.strings} 条（${info.languages.length} 种语言）｜${info.root}`;
+    `数据集：${info.tables} 张表｜字符串表 ${info.strings} 条（${info.languages.length} 种语言）${extra}｜${info.root}`;
 }
 
 function setDirty(dirty: boolean) {
@@ -112,18 +134,30 @@ function renderSkills() {
   }
 }
 
+/**
+ * 传送点：显示**小站名字**而不是编号。
+ *
+ * 名字来自 `Levels.txt` 的 `Waypoint` 列（0..=38，就是存档里的位下标）
+ * 对应的关卡名，再由文本表翻成中文；`waypointNames[i]` 即第 i 位。
+ */
 function renderWaypoints(list: WaypointsDto[]) {
+  // 没有名字的位（存档第 39 位是填充位）直接跳过，不要显示成"小站#N"
+  const nameOf = (i: number) => waypointNames[i] ?? "";
   $("#waypoints").innerHTML = list
     .map(
       (w, d) => `
-      <div>
-        <div class="muted">${w.difficulty}（已开通 ${w.active.filter(Boolean).length} / ${w.active.length}）</div>
-        <div class="diff">
+      <div class="wp-group">
+        <div class="muted">${w.difficulty}（已开通 ${w.active.filter(Boolean).length} / ${waypointNames.filter((n) => n).length}）</div>
+        <div class="wp-row">
           ${w.active
-            .map(
-              (on, i) =>
-                `<label class="wp ${on ? "on" : ""}"><input type="checkbox" data-wp-diff="${d}" data-wp-index="${i}" ${on ? "checked" : ""}/>${i}</label>`,
-            )
+            .map((on, i) => {
+              const name = nameOf(i);
+              if (!name) return "";
+              return `<label class="wp ${on ? "on" : ""}" title="${escapeAttr(name)}">
+                   <input type="checkbox" data-wp-diff="${d}" data-wp-index="${i}" ${on ? "checked" : ""}/>
+                   ${escapeHtml(name)}
+                 </label>`;
+            })
             .join("")}
         </div>
       </div>`,
@@ -132,12 +166,14 @@ function renderWaypoints(list: WaypointsDto[]) {
   $("#waypoints-section").classList.remove("hidden");
 }
 
-/** 当前选中的物品序号（用于明细面板） */
+/** 当前选中的物品序号（用于属性弹窗） */
 let selectedItem: number | null = null;
 /** 属性目录缓存 */
 let statCatalog: StatCatalogEntry[] = [];
 /** 当前布局设置（容器网格尺寸要用） */
 let currentLayout: LayoutSettings | null = null;
+/** 小站名表（下标 = 存档里的位下标） */
+let waypointNames: string[] = [];
 
 /** 物品列表行：点一行进入明细 */
 function renderItems(list: ItemDto[]) {
@@ -280,16 +316,29 @@ function collectItemEdits(): ItemEdit[] {
   return edits;
 }
 
-/** 选中一件物品，打开明细面板 */
+/** 选中一件物品：打开**属性弹窗**（不再往页面下面堆内容） */
 async function selectItem(index: number) {
   selectedItem = index;
   renderItems(items);
   try {
     const detail = await call<ItemDetailDto>("item_detail", { index });
     renderItemDetail(detail);
+    openItemModal();
   } catch (e) {
     showError(e, "读取物品明细失败");
   }
+}
+
+/** 打开物品属性弹窗 */
+function openItemModal() {
+  $("#item-modal").classList.remove("hidden");
+  $("#detail-result").textContent = "";
+}
+
+/** 关闭物品属性弹窗 */
+function closeItemModal() {
+  $("#item-modal").classList.add("hidden");
+  pendingDetailEdits.length = 0;
 }
 
 /** 渲染明细面板 */
@@ -346,11 +395,9 @@ function renderItemDetail(detail: ItemDetailDto) {
         index: it.index,
         stat: Number(btn.dataset.delStat),
       });
-      toast("已记录删除，点「应用该物品的修改」生效");
+      toast("已记录删除，点弹窗里的「应用修改」生效");
     });
   });
-
-  $("#item-detail-section").classList.remove("hidden");
 }
 
 /** 明细面板里挂起的改动（删除属性等） */
@@ -402,8 +449,14 @@ async function applyDetailEdits() {
     const n = await call<number>("apply_item_edits", { edits });
     pendingDetailEdits.length = 0;
     toast(`已应用 ${n} 条修改。点「保存」才会写入文件。`);
+    const keep = selectedItem;
     await loadAll();
-    if (selectedItem !== null) await selectItem(selectedItem);
+    // 重新读一遍这件物品并保持弹窗打开（值可能被规范化，要让用户看到结果）
+    if (keep !== null) {
+      const detail = await call<ItemDetailDto>("item_detail", { index: keep });
+      renderItemDetail(detail);
+      openItemModal();
+    }
   } catch (e) {
     showError(e, "修改被拒绝");
     $("#detail-result").textContent = String((e as { message?: string })?.message ?? e);
@@ -424,14 +477,10 @@ async function loadStatCatalog() {
 }
 
 async function loadAll() {
-  try {
-    const info = await call<BundleInfo>("bundle_info");
-    if (info.available) {
-      $("#dataset").textContent += `｜内置数据包 ${(info.totalBytes / 1048576).toFixed(1)} MB`;
-    }
-  } catch {
-    /* 老版本后端没有这个命令，忽略 */
-  }
+  // 数据集那行由 refreshDataset() 整行重建：不能在这里用 `+=` 追加，
+  // 否则每调用一次 loadAll() 就多贴一段（刷新/保存后都会调用）。
+  bundleInfo = await loadBundleInfo();
+  await refreshDataset();
   try {
     const st = await call<ItemStats>("item_stats");
     $("#items-stats").textContent =
@@ -444,12 +493,81 @@ async function loadAll() {
   fillCharacter(char);
   skills = await call<SkillDto[]>("skills");
   renderSkills();
+  // 小站名要在渲染传送点之前拿到，否则只能显示编号
+  if (waypointNames.length === 0) {
+    try {
+      waypointNames = await call<string[]>("waypoint_names");
+    } catch {
+      /* 老后端没有这个命令 */
+    }
+  }
   renderWaypoints(await call<WaypointsDto[]>("waypoints"));
+  renderQuests();
+  try {
+    mercItems = await call<MercenaryItem[]>("mercenary_items");
+  } catch {
+    mercItems = [];
+  }
   items = await call<ItemDto[]>("item_details");
   renderItems(items);
   await loadStatCatalog();
+  // 先拿布局（容器网格尺寸来源，它会顺带渲染一次容器视图），再载图标并重渲染；
+  // 反过来会让第一次渲染缺图标。
   await refreshLayout();
+  await loadIcons();
+  renderMerc();
+  $("#tabs").classList.remove("hidden");
   setDirty(await call<boolean>("is_dirty"));
+}
+
+/** 任务进度：后端还没暴露任务编辑，先把状态说清楚，不假装能改 */
+function renderQuests() {
+  $("#quests").innerHTML =
+    `<div class="muted">任务进度的读写尚未接入（存档的任务段已能解析，编辑接口还没做）。</div>`;
+  $("#quests-section").classList.remove("hidden");
+}
+
+/**
+ * 佣兵：把存档**佣兵段**里的物品按身体槽位画出来。
+ *
+ * 佣兵段与主物品列表分开存储，所以这里用的是佣兵段自己的序号；
+ * 图标/名字按物品代码解析（与物品栏一致）。
+ */
+let mercItems: MercenaryItem[] = [];
+function renderMerc() {
+  const host = $("#merc");
+  if (mercItems.length === 0) {
+    host.innerHTML = `<div class="muted">这件存档的佣兵段里没有物品。</div>`;
+    $("#merc-section").classList.remove("hidden");
+    return;
+  }
+  const slotLabel: Record<string, string> = {
+    Head: "头", Neck: "颈", Torso: "身", RightArm: "右臂", LeftArm: "左臂",
+    RightRing: "右戒", LeftRing: "左戒", Gloves: "手", Belt: "腰", Feet: "脚",
+  };
+  host.innerHTML = mercItems
+    .map(
+      (it) =>
+        `<div class="merc-card">
+           <span class="merc-slot">${escapeHtml(slotLabel[it.bodyLocation] ?? it.bodyLocation)}</span>
+           <span class="merc-code">${escapeHtml(it.code)}</span>
+           <span class="merc-body">
+             <b>${escapeHtml(itemNameOf(it.code))}</b>
+             <span class="muted">品质 ${escapeHtml(it.quality)}｜等级 ${it.level}｜属性 ${it.statsCount} 条${
+               it.socketCount > 0 ? `｜孔 ${it.socketedCount}/${it.socketCount}` : ""
+             }</span>
+           </span>
+         </div>`,
+    )
+    .join("");
+  $("#merc-section").classList.remove("hidden");
+}
+
+/** 用物品代码在已加载的物品里找名字（佣兵物品不在主列表里，找不到就显示代码） */
+function itemNameOf(code: string): string {
+  const hit = items.find((i) => i.code === code);
+  if (hit) return hit.name;
+  return code;
 }
 
 async function applyEdits(edits: Edit[], label: string) {
@@ -482,6 +600,10 @@ async function refreshLayout() {
     ($("#l-stash-cols") as HTMLInputElement).value = String(settings.stashCols);
     ($("#l-stash-rows") as HTMLInputElement).value = String(settings.stashRows);
     ($("#l-merc") as HTMLInputElement).checked = settings.mercFullEquipment;
+    // 记住布局并刷新容器网格：网格尺寸（背包/方块/箱子行列数）全部来自它。
+    // 漏了这三行会让 renderContainerView 恒早退，容器视图根本不渲染。
+    currentLayout = settings;
+    renderContainerView();
 
     const hint =
       `推断：背包最大 (${hints.inventoryMax?.[0] ?? "-"},${hints.inventoryMax?.[1] ?? "-"})｜` +
@@ -539,6 +661,22 @@ async function checkBounds() {
 }
 
 /** 启动自检：后端若已打开存档（例如开发时用 D2R_OPEN_SAVE 自动打开），直接进入编辑界面 */
+/**
+ * 切换页签。
+ *
+ * 面板 id 约定为 `tab-<key>`；物品栏/佣兵等面板的内容在 loadAll() 时就已填好，
+ * 这里只切换可见性，不做重新加载（避免切页签反复请求后端）。
+ */
+function activateTab(key: string) {
+  document.querySelectorAll<HTMLButtonElement>("#tabs .tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === key);
+  });
+  document.querySelectorAll<HTMLElement>(".tab-panel").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.id !== `tab-${key}`);
+  });
+  // 切到物品栏时容器网格可能因为之前尺寸未知而没渲染，这里补一次
+  if (key === "items") renderContainerView();
+}
 async function bootIfAlreadyOpen() {
   try {
     const info = await call<SaveInfo | null>("current_save");
@@ -554,6 +692,25 @@ async function bootIfAlreadyOpen() {
   }
 }
 
+/**
+ * 载入物品图标（游戏原图，随程序内嵌）。
+ *
+ * 一次全量取回并缓存在前端：图标很小（约 300 张），逐个请求反而更麻烦；
+ * 后端不可用时静默跳过，网格会退化成只显示物品代码。
+ */
+let iconsLoaded = false;
+async function loadIcons() {
+  if (iconsLoaded) return;
+  try {
+    const icons = await call<[string, string][]>("item_icons");
+    if (icons.length === 0) return;
+    setItemIcons(icons);
+    iconsLoaded = true;
+    renderContainerView();
+  } catch {
+    /* 老后端没有这个命令 */
+  }
+}
 function bind() {
   // 明细面板：应用该物品的修改 / 添加属性
   $("#btn-apply-detail").addEventListener("click", applyDetailEdits);
@@ -619,7 +776,33 @@ function bind() {
     }
   });
 
+  // 物品属性弹窗：关闭按钮 / 遮罩点击 / Esc
+  document.querySelectorAll("[data-close-modal]").forEach((el) => {
+    el.addEventListener("click", closeItemModal);
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && !$("#item-modal").classList.contains("hidden")) closeItemModal();
+  });
+
+  // 页签切换
+  document.querySelectorAll<HTMLButtonElement>("#tabs .tab").forEach((btn) => {
+    btn.addEventListener("click", () => activateTab(btn.dataset.tab ?? "char"));
+  });
+
+  // 数字键 1..6 直接切页签（键盘操作比鼠标快，也方便截图核对）
+  document.addEventListener("keydown", (ev) => {
+    if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLSelectElement) return;
+    const order = ["char", "skills", "quests", "items", "merc", "settings"];
+    const n = Number(ev.key);
+    if (Number.isInteger(n) && n >= 1 && n <= order.length) activateTab(order[n - 1]);
+  });
+
   void bootIfAlreadyOpen();
+
+  // 开发/自测用：`VITE_INITIAL_TAB=quests` 时启动就切到该页签，方便截图核对。
+  // 正常构建里该值是 undefined，等价于不生效。
+  const initialTab = (import.meta as { env?: Record<string, string> }).env?.VITE_INITIAL_TAB;
+  if (initialTab) activateTab(initialTab);
 
   $("#btn-open").addEventListener("click", async () => {
     try {

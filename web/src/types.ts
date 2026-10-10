@@ -85,6 +85,7 @@ export interface BundleInfo {
   available: boolean;
   excelTables: number;
   stringFiles: number;
+  icons: number;
   totalBytes: number;
 }
 
@@ -191,4 +192,15 @@ export interface StatCatalogEntry {
   hasParamBits: boolean;
   userVisible: boolean;
   descTemplate: string | null;
+}
+export interface MercenaryItem {
+  index: number;
+  code: string;
+  quality: string;
+  level: number;
+  bodyLocation: string;
+  statsCount: number;
+  socketCount: number;
+  socketedCount: number;
+  stats: [number, number, number][];
 }

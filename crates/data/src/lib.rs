@@ -21,6 +21,7 @@ pub mod statlimit;
 pub mod statname;
 pub mod strings;
 pub mod table;
+pub mod waypointname;
 
 pub use dataset::{Dataset, ModInfo, TableStore};
 pub use itemname::{ItemName, ItemNamer};
@@ -33,6 +34,7 @@ pub use statlimit::{StatLimit, StatLimits};
 pub use statname::{StatName, StatNamer};
 pub use strings::Strings;
 pub use table::{DataError, Table};
+pub use waypointname::{WaypointNamer, WAYPOINT_COUNT};
 
 /// 在游戏目录下定位 loader 编译产物（数据集根），取版本号最大的一个。
 ///

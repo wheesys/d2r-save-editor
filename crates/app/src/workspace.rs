@@ -65,6 +65,8 @@ pub struct Workspace {
     stat_limits: d2r_data::StatLimits,
     /// 属性名解析器（属性 ID → 中文名/内部名/步长）。
     stat_namer: d2r_data::StatNamer,
+    /// 小站名解析器（位下标 → 小站中文名）。
+    waypoint_namer: d2r_data::WaypointNamer,
     /// 当前编辑会话。
     session: Option<EditSession>,
     /// 当前已打开的存档信息（未打开时为 `None`）。
@@ -126,9 +128,10 @@ impl Workspace {
             strings = crate::bundle::load_strings();
             let info = crate::bundle::info();
             source = format!(
-                "内置数据包（{} 张表 / {} 个字符串文件 / {:.1} MB）",
+                "内置数据包（{} 张表 / {} 个字符串文件 / {} 个图标 / {:.1} MB）",
                 n,
                 info.string_files,
+                info.icons,
                 info.total_bytes as f64 / 1048576.0
             );
         }
@@ -153,11 +156,15 @@ impl Workspace {
             }
         }
 
-        // 属性位宽上限与属性名：装配完表之后立刻取一次（避免 apply 时再借表）
+        // 属性位宽上限、属性名、小站名：装配完表之后立刻取一次（避免 apply 时再借表）
         let stat_limits = d2r_data::StatLimits::from_store(&mut tables);
         let stat_namer = match tables.get("ItemStatCost") {
             Some(t) => d2r_data::StatNamer::new(t, &strings),
             None => d2r_data::StatNamer::empty(),
+        };
+        let waypoint_namer = match tables.get("Levels") {
+            Some(t) => d2r_data::WaypointNamer::new(t, &strings),
+            None => d2r_data::WaypointNamer::default(),
         };
 
         Self {
@@ -167,6 +174,7 @@ impl Workspace {
             tables,
             stat_limits,
             stat_namer,
+            waypoint_namer,
             strings,
             lang: "zhCN".to_string(),
             layout: LayoutSettings::default(),
@@ -484,6 +492,16 @@ impl Workspace {
     /// 物品汇总统计。
     pub fn item_stats(&self) -> Result<ItemStats, AppError> {
         Ok(self.session()?.item_stats())
+    }
+
+    /// 佣兵装备段里的物品。
+    pub fn mercenary_items(&self) -> Result<Vec<d2r_core::MercenaryItem>, AppError> {
+        Ok(self.session()?.mercenary_items())
+    }
+
+    /// 小站名字表（下标 = 存档里的位下标）。界面用它把 1 2 3 4 换成站名。
+    pub fn waypoint_names(&self) -> Vec<String> {
+        self.waypoint_namer.all().to_vec()
     }
 
     /// 属性名解析器（只读）。

@@ -132,31 +132,41 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
   const inBounds: ItemDto[] = [];
   const outOfBounds: ItemDto[] = [];
 
-  for (const it of mine) {
-    const fits = it.invX + it.width <= spec.cols && it.invY + it.height <= spec.rows;
-    (fits ? inBounds : outOfBounds).push(it);
+  // 槽位型容器（装备位）按槽位画，物品的 (invX,invY) 对它没有意义，
+  // 所以**不做格子越界判断**——否则戴在身上的 2×2 物品会被误判成"越界"而不显示。
+  if (spec.slots) {
+    inBounds.push(...mine);
+  } else {
+    for (const it of mine) {
+      const fits = it.invX + it.width <= spec.cols && it.invY + it.height <= spec.rows;
+      (fits ? inBounds : outOfBounds).push(it);
+    }
   }
 
-  const blocks = inBounds
-    .map((it) => {
-      const sel = selected === it.index ? " selected" : "";
-      const style =
-        `left:${it.invX * CELL}px;top:${it.invY * CELL}px;` +
-        `width:${it.width * CELL - 2}px;height:${it.height * CELL - 2}px;`;
-      const label = itemLabel(it);
-      const socketNote = it.socketCount > 0 ? `<span class="blk-sock">${it.socketedCount}/${it.socketCount}</span>` : "";
-      const icon = iconOf(it.code);
-      const art = icon
-        ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it.code)}" draggable="false" />`
-        : `<span class="blk-code">${escapeHtml(it.code)}</span>`;
-      return `<div class="blk q-${it.quality.toLowerCase()}${sel}" style="${style}"
+  // 槽位型容器（装备位）只用下面的槽位框渲染，这里不要再画一遍，否则同一件装备会出现两次。
+  const blocks = spec.slots
+    ? ""
+    : inBounds
+        .map((it) => {
+          const sel = selected === it.index ? " selected" : "";
+          const style =
+            `left:${it.invX * CELL}px;top:${it.invY * CELL}px;` +
+            `width:${it.width * CELL - 2}px;height:${it.height * CELL - 2}px;`;
+          const label = itemLabel(it);
+          const socketNote =
+            it.socketCount > 0 ? `<span class="blk-sock">${it.socketedCount}/${it.socketCount}</span>` : "";
+          const icon = iconOf(it.code);
+          const art = icon
+            ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it.code)}" draggable="false" />`
+            : `<span class="blk-code">${escapeHtml(it.code)}</span>`;
+          return `<div class="blk q-${it.quality.toLowerCase()}${sel}" style="${style}"
         data-item="${it.index}" title="${escapeAttr(tooltip(it))}">
         ${art}
         <span class="blk-name">${escapeHtml(label)}</span>
         ${socketNote}
       </div>`;
-    })
-    .join("");
+        })
+        .join("");
 
   // 装备位：固定槽位框
   let slotBoxes = "";
@@ -239,11 +249,11 @@ function tooltip(item: ItemDto): string {
   return parts.join("\n");
 }
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
-function escapeAttr(text: string): string {
+export function escapeAttr(text: string): string {
   return escapeHtml(text).replace(/\n/g, "&#10;");
 }
 

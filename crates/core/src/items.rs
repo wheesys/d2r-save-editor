@@ -236,6 +236,30 @@ pub enum ItemEdit {
     },
 }
 
+/// 佣兵装备段里的一件物品（与主物品列表分开存储）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MercenaryItem {
+    /// 在佣兵段里的序号。
+    pub index: usize,
+    /// 物品代码。
+    pub code: String,
+    /// 品质（调试名）。
+    pub quality: String,
+    /// 物品等级。
+    pub level: u8,
+    /// 装备位（调试名）。
+    pub body_location: String,
+    /// 属性条数。
+    pub stats_count: usize,
+    /// 孔数。
+    pub socket_count: usize,
+    /// 已镶嵌数。
+    pub socketed_count: usize,
+    /// 属性列表。
+    pub stats: Vec<(u16, i64, i32)>,
+}
+
 /// 物品统计（给界面/CLI 汇总）。
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -362,6 +386,34 @@ impl EditSession {
             equipped,
             with_sockets,
         }
+    }
+
+    /// 佣兵装备段里的物品。
+    ///
+    /// 存档的佣兵段与主物品列表是**分开存的**，所以这里的 `index` 是它在佣兵段里的位置。
+    pub fn mercenary_items(&self) -> Vec<MercenaryItem> {
+        let Some(merc) = &self.file.save.merc_items else {
+            return Vec::new();
+        };
+        merc.items
+            .iter()
+            .enumerate()
+            .map(|(index, it)| MercenaryItem {
+                index,
+                code: it.code.to_string(),
+                quality: format!("{:?}", it.quality),
+                level: it.level,
+                body_location: format!("{:?}", it.position.body_location),
+                stats_count: it.stats.len(),
+                socket_count: it.sockets.len(),
+                socketed_count: it.sockets.iter().filter(|s| s.is_some()).count(),
+                stats: it
+                    .stats
+                    .iter()
+                    .map(|s| (s.id.0, s.value, s.layer))
+                    .collect(),
+            })
+            .collect()
     }
 
     /// 从存档推断存储布局（读不出来的项会出现在 `unknowns`）。

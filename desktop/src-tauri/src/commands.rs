@@ -186,6 +186,16 @@ pub fn current_save(state: State<'_, AppState>) -> Option<SaveInfo> {
 pub fn item_icons() -> Vec<(String, String)> {
     d2r_app::bundle::item_icons()
 }
+/// 小站名字表（下标 = 存档里的位下标）。
+#[tauri::command]
+pub fn waypoint_names(state: State<'_, AppState>) -> Vec<String> {
+    state.0.lock().unwrap().waypoint_names()
+}
+/// 佣兵装备段里的物品。
+#[tauri::command]
+pub fn mercenary_items(state: State<'_, AppState>) -> R<Vec<d2r_core::MercenaryItem>> {
+    state.0.lock().unwrap().mercenary_items()
+}
 /// 应用版本信息。
 #[tauri::command]
 pub fn versions() -> serde_json::Value {

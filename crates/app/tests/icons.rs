@@ -10,8 +10,14 @@ fn icons_are_available() {
     assert!(icons.len() > 250, "图标数量偏少：{}", icons.len());
     assert!(icons.iter().any(|(c, _)| c == "hp1"), "应有治疗药水图标");
     assert!(
-        icons.iter().all(|(_, url)| url.starts_with("data:image/png;base64,")),
+        icons
+            .iter()
+            .all(|(_, url)| url.starts_with("data:image/png;base64,")),
         "图标应是 PNG data URL"
     );
-    println!("图标 {} 张，例如 hp1 -> {} 字节", icons.len(), icons[0].1.len());
+    println!(
+        "图标 {} 张，例如 hp1 -> {} 字节",
+        icons.len(),
+        icons[0].1.len()
+    );
 }
