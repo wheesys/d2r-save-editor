@@ -16,11 +16,13 @@
 
 pub mod d2i;
 pub mod edit;
+pub mod items;
 pub mod header;
 pub mod save;
 
 pub use d2i::{D2iError, SharedStash};
 pub use edit::{CharacterView, Edit, EditError, EditSession, SkillView};
+pub use items::{ItemDetail, ItemEdit, ItemStats};
 pub use header::{HeaderError, SaveHeader, SaveVersion, MAGIC};
 pub use save::{RoundTrip, SaveError, SaveFile, SaveKind};
 

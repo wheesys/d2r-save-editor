@@ -7,6 +7,9 @@ import {
   type DatasetInfo,
   type Edit,
   type ItemDto,
+  type ItemEdit,
+  type ItemStats,
+  type BundleInfo,
   type SaveInfo,
   type SaveResult,
   type SkillDto,
@@ -22,6 +25,7 @@ const $ = <T extends HTMLElement>(sel: string): T => {
 };
 
 let skills: SkillDto[] = [];
+let items: ItemDto[] = [];
 let showAllSkills = false;
 
 function toast(message: string, kind: "ok" | "error" = "ok", ms = 4000) {
@@ -127,32 +131,82 @@ function renderItems(list: ItemDto[]) {
   $("#items-summary").textContent =
     `共 ${list.length} 件｜` +
     [...byPage.entries()].map(([k, v]) => `${k}: ${v}`).join("｜");
+
+  const rows = list
+    .map((it) => {
+      const durCell =
+        it.maxDurability && it.maxDurability > 0
+          ? `<input type="number" class="cell-input" min="0" max="${it.maxDurability}" value="${it.durability ?? 0}" data-dur-index="${it.index}" /> / ${it.maxDurability}`
+          : `<span class="muted">—</span>`;
+      const qtyCell =
+        it.quantity !== null
+          ? `<input type="number" class="cell-input" min="1" max="511" value="${it.quantity}" data-qty-index="${it.index}" />`
+          : `<span class="muted">—</span>`;
+      return `<tr>
+        <td>${it.index}</td>
+        <td>${it.code}</td>
+        <td>${it.name}${it.name_resolved ? "" : " <span class='muted'>(未解析)</span>"}</td>
+        <td>${it.quality}</td>
+        <td>${it.level}</td>
+        <td>${it.store_page}${it.body_location !== "None" ? ` · ${it.body_location}` : ""}</td>
+        <td>${it.width}×${it.height}</td>
+        <td>${durCell}</td>
+        <td>${qtyCell}</td>
+        <td>${it.socketCount > 0 ? it.socketCount : "—"}</td>
+        <td>${it.stats_count}</td>
+      </tr>`;
+    })
+    .join("");
+
   $("#items").innerHTML =
-    `<thead><tr><th>代码</th><th>名称</th><th>品质</th><th>等级</th><th>位置</th><th>格</th><th>属性</th></tr></thead><tbody>` +
-    list
-      .map(
-        (it) => `<tr>
-          <td>${it.code}</td>
-          <td>${it.name}${it.name_resolved ? "" : " <span class='muted'>(未解析)</span>"}</td>
-          <td>${it.quality}</td>
-          <td>${it.level}</td>
-          <td>${it.store_page} ${it.body_location !== "None" ? `· ${it.body_location}` : ""}</td>
-          <td>(${it.inv_x},${it.inv_y})</td>
-          <td>${it.stats_count}</td>
-        </tr>`,
-      )
-      .join("") +
-    `</tbody>`;
+    `<thead><tr>
+      <th>#</th><th>代码</th><th>名称</th><th>品质</th><th>等级</th>
+      <th>位置</th><th>占格</th><th>耐久</th><th>数量</th><th>孔</th><th>属性</th>
+     </tr></thead><tbody>${rows}</tbody>`;
   $("#items-section").classList.remove("hidden");
 }
 
+/** 收集物品表里的改动（耐久/数量） */
+function collectItemEdits(): ItemEdit[] {
+  const edits: ItemEdit[] = [];
+  document.querySelectorAll<HTMLInputElement>("input[data-dur-index]").forEach((el) => {
+    const index = Number(el.dataset.durIndex);
+    const value = Number(el.value);
+    const old = items.find((i) => i.index === index)?.durability ?? 0;
+    if (value !== old) edits.push({ kind: "setDurability", index, value });
+  });
+  document.querySelectorAll<HTMLInputElement>("input[data-qty-index]").forEach((el) => {
+    const index = Number(el.dataset.qtyIndex);
+    const value = Number(el.value);
+    const old = items.find((i) => i.index === index)?.quantity ?? 0;
+    if (value !== old) edits.push({ kind: "setQuantity", index, value });
+  });
+  return edits;
+}
 async function loadAll() {
+  try {
+    const info = await call<BundleInfo>("bundle_info");
+    if (info.available) {
+      $("#dataset").textContent += `｜内置数据包 ${(info.totalBytes / 1048576).toFixed(1)} MB`;
+    }
+  } catch {
+    /* 老版本后端没有这个命令，忽略 */
+  }
+  try {
+    const st = await call<ItemStats>("item_stats");
+    $("#items-stats").textContent =
+      `共 ${st.total} 件｜已装备 ${st.equipped}｜含镶嵌物 ${st.withSockets}｜` +
+      st.byQuality.map(([k, v]) => `${k} ${v}`).join("｜");
+  } catch {
+    /* 忽略 */
+  }
   const char = await call<CharacterDto>("character");
   fillCharacter(char);
   skills = await call<SkillDto[]>("skills");
   renderSkills();
   renderWaypoints(await call<WaypointsDto[]>("waypoints"));
-  renderItems(await call<ItemDto[]>("items"));
+  items = await call<ItemDto[]>("item_details");
+  renderItems(items);
   setDirty(await call<boolean>("is_dirty"));
 }
 
@@ -222,6 +276,21 @@ function bind() {
   $("#show-all-skills").addEventListener("change", (ev) => {
     showAllSkills = (ev.target as HTMLInputElement).checked;
     renderSkills();
+  });
+
+  $("#btn-apply-items").addEventListener("click", async () => {
+    const edits = collectItemEdits();
+    if (edits.length === 0) {
+      toast("物品表里没有改动（改完耐久/数量再点这里）", "error");
+      return;
+    }
+    try {
+      const n = await call<number>("apply_item_edits", { edits });
+      toast(`已应用 ${n} 条物品修改。点「保存」才会写入文件。`);
+      await loadAll();
+    } catch (e) {
+      showError(e, "物品修改被拒绝");
+    }
   });
 
   $("#btn-apply-char").addEventListener("click", async () => {

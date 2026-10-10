@@ -48,6 +48,7 @@ export interface WaypointsDto {
 }
 
 export interface ItemDto {
+  index: number;
   code: string;
   name: string;
   name_resolved: boolean;
@@ -59,6 +60,28 @@ export interface ItemDto {
   inv_x: number;
   inv_y: number;
   stats_count: number;
+  defense: number | null;
+  durability: number | null;
+  maxDurability: number | null;
+  quantity: number | null;
+  socketCount: number;
+  width: number;
+  height: number;
+}
+
+export interface ItemStats {
+  total: number;
+  byPage: [string, number][];
+  byQuality: [string, number][];
+  equipped: number;
+  withSockets: number;
+}
+
+export interface BundleInfo {
+  available: boolean;
+  excelTables: number;
+  stringFiles: number;
+  totalBytes: number;
 }
 
 export interface VerifyResult {
@@ -88,6 +111,15 @@ export type Edit =
   | { kind: "setWaypoint"; difficulty: number; index: number; active: boolean };
 
 // StatId 常量（与 d2s::StatId 一致）
+export type ItemEdit =
+  | { kind: "setQuantity"; index: number; value: number }
+  | { kind: "setDurability"; index: number; value: number }
+  | { kind: "setDefense"; index: number; value: number }
+  | { kind: "setStat"; index: number; stat: number; value: number }
+  | { kind: "removeStat"; index: number; stat: number }
+  | { kind: "moveTo"; index: number; col: number; row: number }
+  | { kind: "remove"; index: number };
+
 export const STAT = {
   STRENGTH: 0,
   ENERGY: 1,

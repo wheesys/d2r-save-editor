@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use d2r_core::{Edit, EditSession, SaveKind};
+use d2r_core::{Edit, EditSession, ItemDetail, ItemEdit, ItemStats, SaveKind};
 use d2r_data::{ItemNamer, SkillNamer, Strings, TableStore};
 
 use crate::dto::{
@@ -253,54 +253,58 @@ impl Workspace {
             .collect())
     }
 
-    /// 物品列表（含中文名）。
-    pub fn items(&mut self) -> Result<Vec<ItemDto>, AppError> {
-        // 先把需要的字段取出来，避免同时借用 session 与 tables
-        let raw: Vec<(String, String, Option<u16>, u8, String, String, String, u8, u8, usize)> = {
+    /// 物品明细（含中文名）。
+    pub fn item_details(&mut self) -> Result<Vec<ItemDto>, AppError> {
+        let details: Vec<ItemDetail> = {
             let session = self.session()?;
-            session
-                .file
-                .save
-                .items
-                .iter()
-                .map(|it| {
-                    let p = &it.position;
-                    (
-                        it.code.to_string(),
-                        format!("{:?}", it.quality),
-                        it.quality_data.as_ref().and_then(|q| q.file_index()),
-                        it.level,
-                        format!("{:?}", p.mode),
-                        format!("{:?}", p.body_location),
-                        format!("{:?}", p.store_page),
-                        p.inv_x,
-                        p.inv_y,
-                        it.stats.len(),
-                    )
-                })
-                .collect()
+            session.item_details()
         };
-
+        let size_map = crate::bundle::item_size_map();
         let mut namer = ItemNamer::new(&self.strings, &mut self.tables, self.lang.clone());
-        Ok(raw
+        Ok(details
             .into_iter()
-            .map(|(code, quality, idx, level, mode, body_location, store_page, inv_x, inv_y, stats_count)| {
-                let n = namer.resolve(&code, &quality, idx);
+            .map(|d| {
+                let n = namer.resolve(&d.code, &d.quality, d.quality_index);
+                let (w, h) = size_map.get(&d.code).copied().unwrap_or((1, 1));
                 ItemDto {
-                    code,
+                    index: d.index,
+                    code: d.code,
                     name: n.display(),
                     name_resolved: n.resolved,
-                    quality,
-                    level,
-                    mode,
-                    body_location,
-                    store_page,
-                    inv_x,
-                    inv_y,
-                    stats_count,
+                    quality: d.quality,
+                    level: d.level,
+                    mode: d.mode,
+                    body_location: d.body_location,
+                    store_page: d.store_page,
+                    inv_x: d.inv_x,
+                    inv_y: d.inv_y,
+                    stats_count: d.stats.len(),
+                    defense: d.defense,
+                    durability: d.durability,
+                    max_durability: d.max_durability,
+                    quantity: d.quantity,
+                    socket_count: d.socket_count,
+                    width: w,
+                    height: h,
                 }
             })
             .collect())
+    }
+
+    /// 物品汇总统计。
+    pub fn item_stats(&self) -> Result<ItemStats, AppError> {
+        Ok(self.session()?.item_stats())
+    }
+
+    /// 应用一批物品改动（原子）。
+    pub fn apply_item_edits(&mut self, edits: &[ItemEdit]) -> Result<usize, AppError> {
+        self.session_mut()?.apply_items(edits)?;
+        Ok(edits.len())
+    }
+
+    /// 挂起的物品修改条数。
+    pub fn pending_item_edits(&self) -> usize {
+        self.session.as_ref().map(|s| s.item_edits.len()).unwrap_or(0)
     }
 
     /// 应用修改（原子：任一条失败全部回滚）。

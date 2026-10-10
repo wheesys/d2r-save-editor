@@ -105,6 +105,8 @@ pub struct WaypointsDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemDto {
+    /// 序号（编辑时用它定位物品）。
+    pub index: usize,
     /// 物品代码。
     pub code: String,
     /// 显示名。
@@ -127,12 +129,29 @@ pub struct ItemDto {
     pub inv_y: u8,
     /// 属性条数。
     pub stats_count: usize,
+    /// 防御值。
+    pub defense: Option<i32>,
+    /// 当前耐久。
+    pub durability: Option<i32>,
+    /// 最大耐久。
+    pub max_durability: Option<i32>,
+    /// 堆叠数量。
+    pub quantity: Option<i32>,
+    /// 镶嵌孔数。
+    pub socket_count: usize,
+    /// 占用宽（格）。
+    pub width: u32,
+    /// 占用高（格）。
+    pub height: u32,
 }
 
 /// 修改请求（前端 → 后端）。
 ///
 /// 与 `d2r_core::Edit` 的 JSON 形态一致（`tag = "kind"`）。
 pub type EditRequest = d2r_core::Edit;
+
+/// 物品修改请求（前端 → 后端）。
+pub type ItemEditRequest = d2r_core::ItemEdit;
 
 /// 保存结果。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

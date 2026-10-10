@@ -52,11 +52,6 @@ pub fn waypoints(state: State<'_, AppState>) -> R<Vec<WaypointsDto>> {
     state.0.lock().unwrap().waypoints()
 }
 
-/// 物品列表。
-#[tauri::command]
-pub fn items(state: State<'_, AppState>) -> R<Vec<ItemDto>> {
-    state.0.lock().unwrap().items()
-}
 
 /// 应用一批修改（不落盘）。
 #[tauri::command]
@@ -88,6 +83,29 @@ pub fn load_strings(state: State<'_, AppState>, dir: String) -> R<usize> {
     state.0.lock().unwrap().set_strings_dir(PathBuf::from(dir))
 }
 
+/// 物品明细（含中文名与占格）。
+#[tauri::command]
+pub fn item_details(state: State<'_, AppState>) -> R<Vec<ItemDto>> {
+    state.0.lock().unwrap().item_details()
+}
+
+/// 物品汇总统计。
+#[tauri::command]
+pub fn item_stats(state: State<'_, AppState>) -> R<d2r_core::ItemStats> {
+    state.0.lock().unwrap().item_stats()
+}
+
+/// 应用一批物品修改（不落盘）。
+#[tauri::command]
+pub fn apply_item_edits(state: State<'_, AppState>, edits: Vec<d2r_app::ItemEditRequest>) -> R<usize> {
+    state.0.lock().unwrap().apply_item_edits(&edits)
+}
+
+/// 内置数据包信息（界面显示"数据来源"）。
+#[tauri::command]
+pub fn bundle_info(state: State<'_, AppState>) -> d2r_app::BundleInfo {
+    state.0.lock().unwrap().bundle_info()
+}
 /// 应用版本信息。
 #[tauri::command]
 pub fn versions() -> serde_json::Value {

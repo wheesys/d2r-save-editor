@@ -27,6 +27,7 @@ fn main() -> ExitCode {
         "validate" => cmd_validate(&args[1..]),
         "edit" => cmd_edit(&args[1..]),
         "view" => cmd_view(&args[1..]),
+        "items" => cmd_items(&args[1..]),
         "-h" | "--help" | "help" => {
             usage();
             ExitCode::SUCCESS
@@ -48,6 +49,7 @@ fn usage() {
          d2r validate  <文件.d2s>           容器与物品摆放校验（越界/重叠/未知物品）\n  \
          d2r edit      <文件.d2s> --set <JSON> [--out <文件>]  编辑并保存（先校验后落盘）\n  \
          d2r view      <文件.d2s> [--json]                  角色/技能/传送点/物品总览（界面同源数据）\n  \
+         d2r items     <文件.d2s> [--filter 关键字] [--json] 物品清单/明细\n  \
          d2r dataset   [--game <游戏目录>]  检查数据集\n  \
          d2r strings   [--dir <目录>]       字符串表抽查\n\n\
          环境变量:\n  \
@@ -650,6 +652,16 @@ fn cmd_edit(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    let item_edits: Vec<d2r_app::ItemEditRequest> = match arg_of(args, "--items") {
+        Some(j) => match serde_json::from_str(&j) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("--items 不是合法的物品修改数组：{e}");
+                return ExitCode::from(2);
+            }
+        },
+        None => Vec::new(),
+    };
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let out = arg_of(args, "--out").map(PathBuf::from);
 
@@ -672,6 +684,10 @@ fn cmd_edit(args: &[String]) -> ExitCode {
         eprintln!("修改被拒绝：{e}");
         return ExitCode::from(1);
     }
+    if let Err(e) = ws.apply_item_edits(&item_edits) {
+        eprintln!("物品修改被拒绝：{e}");
+        return ExitCode::from(1);
+    }
     let after = match ws.character() {
         Ok(c) => c,
         Err(e) => {
@@ -687,12 +703,23 @@ fn cmd_edit(args: &[String]) -> ExitCode {
     }
 
     if dry_run {
-        println!("--dry-run：未落盘，共 {} 条修改", ws.pending_edits());
+        println!(
+            "--dry-run：未落盘，共 {} 条角色修改 + {} 条物品修改",
+            ws.pending_edits(),
+            ws.pending_item_edits()
+        );
         return ExitCode::SUCCESS;
     }
     match ws.save_dto(out) {
         Ok(r) => {
-            println!("已保存    : {}（{} 字节，{} 条修改{}）", r.path, r.bytes, r.edits, if r.backed_up { "，已备份原文件" } else { "" });
+            println!(
+                "已保存    : {}（{} 字节，{} 条角色修改 + {} 条物品修改{}）",
+                r.path,
+                r.bytes,
+                r.edits,
+                ws.pending_item_edits(),
+                if r.backed_up { "，已备份原文件" } else { "" }
+            );
             ExitCode::SUCCESS
         }
         Err(e) => {
@@ -724,7 +751,7 @@ fn cmd_view(args: &[String]) -> ExitCode {
     };
     let skills = ws.skills().unwrap_or_default();
     let waypoints = ws.waypoints().unwrap_or_default();
-    let items = ws.items().unwrap_or_default();
+    let items = ws.item_details().unwrap_or_default();
 
     if json {
         let out = serde_json::json!({
@@ -767,7 +794,143 @@ fn cmd_view(args: &[String]) -> ExitCode {
     for (page, n) in by_page {
         println!("  {page:<12} {n} 件");
     }
+    if let Ok(st) = ws.item_stats() {
+        println!("  品质分布  : {}", st.by_quality.iter().map(|(q, n)| format!("{q} {n}")).collect::<Vec<_>>().join("｜"));
+        println!("  已装备 {} 件，含镶嵌物 {} 件", st.equipped, st.with_sockets);
+    }
     ExitCode::SUCCESS
+}
+fn cmd_items(args: &[String]) -> ExitCode {
+    let json = args.iter().any(|a| a == "--json");
+    let filter = arg_of(args, "--filter");
+    let Some(target) = args.iter().find(|a| !a.starts_with("--") && arg_of(args, "--filter").as_deref() != Some(a.as_str())) else {
+        eprintln!("用法: d2r items <文件.d2s> [--filter 关键字] [--json]");
+        return ExitCode::from(2);
+    };
+    let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    if let Err(e) = ws.open(target) {
+        eprintln!("打开失败：{e}");
+        return ExitCode::from(1);
+    }
+    let all = match ws.item_details() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("读取物品失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+    let items: Vec<_> = match &filter {
+        Some(f) => {
+            let key = f.to_lowercase();
+            all.iter()
+                .filter(|i| i.code.to_lowercase().contains(&key) || i.name.to_lowercase().contains(&key))
+                .cloned()
+                .collect()
+        }
+        None => all.clone(),
+    };
+
+    if json {
+        let out = serde_json::json!({
+            "path": target,
+            "stats": ws.item_stats().ok(),
+            "count": items.len(),
+            "items": items,
+        });
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        return ExitCode::SUCCESS;
+    }
+
+    println!("存档      : {target}");
+    if let Ok(st) = ws.item_stats() {
+        println!(
+            "物品      : {} 件｜已装备 {}｜含镶嵌物 {}",
+            st.total, st.equipped, st.with_sockets
+        );
+        println!("  存储页  : {}", st.by_page.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join("｜"));
+        println!("  品质    : {}", st.by_quality.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join("｜"));
+    }
+    if filter.is_some() {
+        println!("过滤      : {filter:?} → {} 件", items.len());
+    }
+    println!();
+    println!(
+        "{:>3}  {:<5} {:<20} {:<8} {:>3}  {:<14} {:<5} {:>9} {:>6} {:>4}",
+        "#", "代码", "名称", "品质", "等级", "位置", "占格", "耐久", "数量", "孔"
+    );
+    for it in &items {
+        let dur = match (it.durability, it.max_durability) {
+            (Some(_), Some(0)) => "-".to_string(), // 无耐久概念
+            (Some(c), Some(m)) => format!("{c}/{m}"),
+            (Some(c), None) => format!("{c}"),
+            _ => "-".to_string(),
+        };
+        let qty = it.quantity.map(|q| q.to_string()).unwrap_or_else(|| "-".into());
+        let sockets = if it.socket_count > 0 { it.socket_count.to_string() } else { "-".into() };
+        let place = if it.body_location != "None" {
+            format!("{}·{}", short_page(&it.store_page), short_slot(&it.body_location))
+        } else {
+            short_page(&it.store_page).to_string()
+        };
+        println!(
+            "{:>3}  {:<5} {:<20} {:<8} {:>3}  {:<14} {}×{:<3} {:>9} {:>6} {:>4}{}",
+            it.index,
+            it.code,
+            truncate(&it.name, 20),
+            it.quality,
+            it.level,
+            place,
+            it.width,
+            it.height,
+            dur,
+            qty,
+            sockets,
+            if it.name_resolved { "" } else { "  (名字未解析)" }
+        );
+    }
+    ExitCode::SUCCESS
+}
+
+/// 存储页缩写（表格里省地方）。
+fn short_page(page: &str) -> &str {
+    match page {
+        "Inventory" => "背包",
+        "Stash" => "箱子",
+        "Cube" => "方块",
+        "Belt" => "腰带",
+        "Equip" => "装备",
+        "Null" => "—",
+        other => other,
+    }
+}
+
+/// 装备位缩写。
+fn short_slot(slot: &str) -> &str {
+    match slot {
+        "Head" => "头",
+        "Neck" => "颈",
+        "Torso" => "身",
+        "RightArm" => "右臂",
+        "LeftArm" => "左臂",
+        "RightRing" => "右戒",
+        "LeftRing" => "左戒",
+        "Belt" => "腰",
+        "Feet" => "脚",
+        "Gloves" => "手",
+        "RightHand" => "右手",
+        "LeftHand" => "左手",
+        other => other,
+    }
+}
+
+/// 按字符数截断（中文按 2 宽度估算，这里简单按字符数）。
+fn truncate(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", chars[..max - 1].iter().collect::<String>())
+    }
 }
 fn find_ci(dir: &Path, stem: &str) -> Option<PathBuf> {    let wanted = format!("{stem}.txt");
     std::fs::read_dir(dir)

@@ -45,6 +45,7 @@ cargo run -p d2r-cli -- roundtrip                       # 往返一致性（写�
 cargo run -p d2r-cli -- inspect <存档> [--json]          # 头部/角色/物品（中文名）
 cargo run -p d2r-cli -- view   <存档> [--json]           # 角色+技能+传送点+物品总览
 cargo run -p d2r-cli -- edit   <存档> --set '<JSON>'     # 编辑并保存（先校验后落盘）
+cargo run -p d2r-cli -- items  <存档> [--filter 关键字]  # 物品清单/明细（--json）
 cargo run -p d2r-cli -- validate <文件.d2s>              # 容器与摆放校验
 cargo run -p d2r-cli -- dataset                          # 数据集与字符串表
 cargo run -p d2r-cli -- strings [rvl amu]                # 字符串表抽查
@@ -78,7 +79,8 @@ d2r edit 角色.d2s --set '[{"kind":"setLevel","level":90},
 | 2 `.d2s` 读入→写出逐字节一致 | 🟢 8 个样本中 **7 个逐字节一致**（含 `.d2i`）；剩 1 个已知条目段编码差异（见 `docs/next-steps-materials.md` §3.10） |
 | 3 容器与物品摆放校验 | 🟢 区域级重叠 / 装备位重复 / 未知物品代码；记录了"不能用原版表判越界"与"合成箱局部坐标"两条坑（§3.9） |
 | 4 属性/技能/任务/传送点编辑 | 🟢 等级、8 项属性、技能等级、三难度传送点；带校验与备份的保存 |
-| 5 物品编辑与导入 | ⬜ 待开始 |
+| 5 物品编辑 | 🟢 查看明细（属性/耐久/数量/孔）、改耐久·数量·防御、增删属性、移动格子、删除物品（含自包含数据包） |
+| 5b 物品导入（自定义 JSON） | ⬜ 待开始 |
 | 6 佣兵装备 | ⬜ 待开始 |
 | 7 Tauri 界面整合 | 🟢 桌面端可运行：打开存档 → 显示角色/技能/传送点/物品 → 编辑 → 校验 → 保存（界面中文） |
 

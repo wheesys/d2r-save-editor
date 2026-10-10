@@ -138,6 +138,8 @@ pub struct EditSession {
     pub file: SaveFile,
     /// 已应用的指令记录。
     pub applied: Vec<Edit>,
+    /// 已应用的物品指令记录。
+    pub item_edits: Vec<crate::items::ItemEdit>,
 }
 
 impl EditSession {
@@ -148,7 +150,13 @@ impl EditSession {
         if file.kind != SaveKind::Character {
             return Err(EditError::Invalid("编辑会话目前只支持角色存档（.d2s）".into()));
         }
-        Ok(Self { path: Some(path.to_path_buf()), original: file.original.clone(), file, applied: Vec::new() })
+        Ok(Self {
+            path: Some(path.to_path_buf()),
+            original: file.original.clone(),
+            file,
+            applied: Vec::new(),
+            item_edits: Vec::new(),
+        })
     }
 
     /// 角色信息快照。
@@ -276,7 +284,7 @@ impl EditSession {
 
     /// 是否有修改。
     pub fn is_dirty(&self) -> bool {
-        !self.applied.is_empty()
+        !self.applied.is_empty() || !self.item_edits.is_empty()
     }
 
     /// 校验当前状态：写出 → 重新解析 → 比对关键区域。
@@ -297,7 +305,14 @@ impl EditSession {
         }
         // 关键字段必须一致
         let before = self.character();
-        let after = EditSession { path: None, original: vec![], file: reparsed, applied: vec![] }.character();
+        let after = EditSession {
+            path: None,
+            original: vec![],
+            file: reparsed,
+            applied: vec![],
+            item_edits: vec![],
+        }
+        .character();
         if before != after {
             return Err(EditError::Verification(format!(
                 "重新解析后的角色信息与写出前不一致：{before:?} != {after:?}"

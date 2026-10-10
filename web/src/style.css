@@ -115,3 +115,15 @@ tr:hover td { background: var(--panel-2); }
   z-index: 20;
 }
 .toast.error { border-color: var(--danger); }
+
+/* 物品表里的行内编辑框 */
+.cell-input {
+  width: 68px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+.cell-input:focus { border-color: var(--accent); outline: none; }
