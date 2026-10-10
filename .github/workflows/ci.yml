@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # CI 上没有、也不应该有游戏数据。允许"无数据构建"，只验证可编译。
+  D2R_ALLOW_NO_BUNDLE: "1"
+
+jobs:
+  test:
+    name: 测试（Rust + 前端）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: 格式检查
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: 测试
+        # 依赖本机样本的测试会自动跳过（找不到 samples/ 就返回）
+        run: cargo test --workspace
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 前端类型检查与构建
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build

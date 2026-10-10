@@ -33,9 +33,15 @@ fn table_store_lists_and_caches() {
 
     let mut store = TableStore::new(&dir);
     // 只列 .txt，名字小写化并排序
-    assert_eq!(store.available(), vec!["inventory".to_string(), "itemstatcost".to_string()]);
+    assert_eq!(
+        store.available(),
+        vec!["inventory".to_string(), "itemstatcost".to_string()]
+    );
     // 大小写不敏感查找
-    assert_eq!(store.get("ItemStatCost").unwrap().int(0, "save bits"), Some(9));
+    assert_eq!(
+        store.get("ItemStatCost").unwrap().int(0, "save bits"),
+        Some(9)
+    );
     assert_eq!(store.get("inventory").unwrap().int(0, "invwidth"), Some(1));
     // 缺失返回 None（并缓存该结果）
     assert!(store.get("MagicPrefix").is_none());
@@ -48,7 +54,11 @@ fn mod_scan_finds_mods_directory() {
     let game = tmp_dir("game");
     let mod_dir = game.join("mods").join("fengtu2");
     std::fs::create_dir_all(&mod_dir).unwrap();
-    std::fs::write(mod_dir.join("modinfo.json"), br#"{ "name": "fengtu2", "savepath": "../" }"#).unwrap();
+    std::fs::write(
+        mod_dir.join("modinfo.json"),
+        br#"{ "name": "fengtu2", "savepath": "../" }"#,
+    )
+    .unwrap();
 
     let found = ModInfo::scan(&game);
     assert_eq!(found.len(), 1);

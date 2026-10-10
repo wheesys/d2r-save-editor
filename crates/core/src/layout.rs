@@ -74,7 +74,10 @@ impl LayoutHints {
     /// 背包是否**看起来**被扩展过（超出原版默认尺寸）。
     pub fn inventory_looks_expanded(&self) -> bool {
         match self.inventory_max {
-            Some((x, y)) => x + 1 > LayoutSettings::default().inventory_cols || y + 1 > LayoutSettings::default().inventory_rows,
+            Some((x, y)) => {
+                x + 1 > LayoutSettings::default().inventory_cols
+                    || y + 1 > LayoutSettings::default().inventory_rows
+            }
             None => false,
         }
     }
@@ -91,7 +94,10 @@ impl LayoutHints {
     /// 箱子是否看起来被扩展过。
     pub fn stash_looks_expanded(&self) -> bool {
         match self.stash_max {
-            Some((x, y)) => x + 1 > LayoutSettings::default().stash_cols || y + 1 > LayoutSettings::default().stash_rows,
+            Some((x, y)) => {
+                x + 1 > LayoutSettings::default().stash_cols
+                    || y + 1 > LayoutSettings::default().stash_rows
+            }
             None => false,
         }
     }
@@ -152,14 +158,21 @@ mod tests {
 
     #[test]
     fn hints_detect_expansion() {
-        let mut h = LayoutHints { inventory_max: Some((14, 7)), ..Default::default() };
+        let mut h = LayoutHints {
+            inventory_max: Some((14, 7)),
+            ..Default::default()
+        };
         assert!(h.inventory_looks_expanded());
         assert!(!h.stash_looks_expanded(), "箱子没有数据时不应判定为扩展");
         h.stash_max = Some((15, 15));
         assert!(h.stash_looks_expanded());
 
         // 原版尺寸内不算扩展
-        let vanilla = LayoutHints { inventory_max: Some((9, 3)), stash_max: Some((9, 9)), ..Default::default() };
+        let vanilla = LayoutHints {
+            inventory_max: Some((9, 3)),
+            stash_max: Some((9, 9)),
+            ..Default::default()
+        };
         assert!(!vanilla.inventory_looks_expanded());
         assert!(!vanilla.stash_looks_expanded());
     }
@@ -180,7 +193,14 @@ mod tests {
         assert!(items[2].contains("佣兵"));
 
         // 佣兵段存在但没有物品 → 不该问
-        let empty_merc = LayoutHints { merc_section: true, merc_items: 0, ..Default::default() };
-        assert!(needs_confirmation(&empty_merc).is_empty(), "空佣兵段不应产生提问");
+        let empty_merc = LayoutHints {
+            merc_section: true,
+            merc_items: 0,
+            ..Default::default()
+        };
+        assert!(
+            needs_confirmation(&empty_merc).is_empty(),
+            "空佣兵段不应产生提问"
+        );
     }
 }

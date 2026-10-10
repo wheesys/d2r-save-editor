@@ -2,9 +2,9 @@
 //!
 //! 设计要点：
 //! - **带校验的保存**：写出后立即重新解析，并检查未知尾随数据没被丢掉；
-//! 写路径不通过就不落盘（见 `docs/research.md` §4.5）。
+//!   写路径不通过就不落盘（见 `docs/research.md` §4.5）。
 //! - **不写死游戏常量**：数值上限来自数据集（`ItemStatCost.txt`），
-//! 或由调用方给出（例如等级 1–99）。
+//!   或由调用方给出（例如等级 1–99）。
 //! - 界面（Tauri）与 CLI 共用这一层，UI 只负责展示与收集输入。
 
 use std::path::{Path, PathBuf};
@@ -65,7 +65,11 @@ pub struct SkillView {
 
 /// 一条修改指令。
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Edit {
     /// 设置等级。
     SetLevel {
@@ -148,7 +152,9 @@ impl EditSession {
         let path = path.as_ref();
         let file = SaveFile::open(path).map_err(|e| EditError::Load(e.to_string()))?;
         if file.kind != SaveKind::Character {
-            return Err(EditError::Invalid("编辑会话目前只支持角色存档（.d2s）".into()));
+            return Err(EditError::Invalid(
+                "编辑会话目前只支持角色存档（.d2s）".into(),
+            ));
         }
         Ok(Self {
             path: Some(path.to_path_buf()),
@@ -248,10 +254,18 @@ impl EditSession {
                 let d = difficulty_from(*difficulty)?;
                 match self.file.save.waypoints.get_mut(d) {
                     Some(w) => w.unlock_all(),
-                    None => return Err(EditError::Invalid(format!("难度 {difficulty} 的传送点段不存在"))),
+                    None => {
+                        return Err(EditError::Invalid(format!(
+                            "难度 {difficulty} 的传送点段不存在"
+                        )))
+                    }
                 }
             }
-            Edit::SetWaypoint { difficulty, index, active } => {
+            Edit::SetWaypoint {
+                difficulty,
+                index,
+                active,
+            } => {
                 let d = difficulty_from(*difficulty)?;
                 match self.file.save.waypoints.get_mut(d) {
                     Some(w) => {
@@ -260,7 +274,11 @@ impl EditSession {
                         }
                         w.set_active(*index, *active);
                     }
-                    None => return Err(EditError::Invalid(format!("难度 {difficulty} 的传送点段不存在"))),
+                    None => {
+                        return Err(EditError::Invalid(format!(
+                            "难度 {difficulty} 的传送点段不存在"
+                        )))
+                    }
                 }
             }
         }
@@ -291,7 +309,10 @@ impl EditSession {
     ///
     /// 返回 `(写出的字节, 往返是否逐字节一致)`。
     pub fn verify(&self) -> Result<(Vec<u8>, bool), EditError> {
-        let bytes = self.file.to_bytes().map_err(|e| EditError::Write(e.to_string()))?;
+        let bytes = self
+            .file
+            .to_bytes()
+            .map_err(|e| EditError::Write(e.to_string()))?;
         // 重新解析，确保写出的东西自己读得回来
         let reparsed = SaveFile::from_bytes(SaveKind::Character, bytes.clone())
             .map_err(|e| EditError::Verification(format!("写出的文件无法重新解析：{e}")))?;
@@ -333,7 +354,8 @@ impl EditSession {
             std::fs::copy(dest, &backup)
                 .map_err(|e| EditError::Write(format!("备份失败 {}：{e}", backup.display())))?;
         }
-        std::fs::write(dest, &bytes).map_err(|e| EditError::Write(format!("写入失败 {}：{e}", dest.display())))?;
+        std::fs::write(dest, &bytes)
+            .map_err(|e| EditError::Write(format!("写入失败 {}：{e}", dest.display())))?;
         Ok(dest.to_path_buf())
     }
 
@@ -352,7 +374,9 @@ fn difficulty_from(v: u8) -> Result<d2s::Difficulty, EditError> {
         0 => Ok(d2s::Difficulty::Normal),
         1 => Ok(d2s::Difficulty::Nightmare),
         2 => Ok(d2s::Difficulty::Hell),
-        other => Err(EditError::Invalid(format!("难度只能是 0/1/2，收到 {other}"))),
+        other => Err(EditError::Invalid(format!(
+            "难度只能是 0/1/2，收到 {other}"
+        ))),
     }
 }
 

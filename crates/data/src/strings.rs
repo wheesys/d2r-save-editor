@@ -85,7 +85,11 @@ impl Strings {
         let mut files: Vec<_> = std::fs::read_dir(dir)?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
-            .filter(|p| p.extension().map(|e| e.eq_ignore_ascii_case("json")).unwrap_or(false))
+            .filter(|p| {
+                p.extension()
+                    .map(|e| e.eq_ignore_ascii_case("json"))
+                    .unwrap_or(false)
+            })
             .collect();
         files.sort();
         for f in files {
@@ -105,7 +109,9 @@ impl Strings {
     pub fn from_json_bytes(bytes: &[u8]) -> Self {
         let mut me = Strings::default();
         let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else { return me };
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+            return me;
+        };
         let array = match &value {
             serde_json::Value::Array(a) => a.clone(),
             // 也容忍 { "strings": [...] } 之类的包装
@@ -116,7 +122,9 @@ impl Strings {
             _ => return me,
         };
         for item in array {
-            let serde_json::Value::Object(obj) = item else { continue };
+            let serde_json::Value::Object(obj) = item else {
+                continue;
+            };
             let mut key: Option<String> = None;
             let mut id: Option<String> = None;
             let mut langs: HashMap<String, String> = HashMap::new();
@@ -143,10 +151,16 @@ impl Strings {
                 }
             }
             if let Some(k) = key {
-                me.entries.entry(k.to_ascii_lowercase()).or_default().extend(langs.clone());
+                me.entries
+                    .entry(k.to_ascii_lowercase())
+                    .or_default()
+                    .extend(langs.clone());
             }
             if let Some(i) = id {
-                me.entries.entry(i.to_ascii_lowercase()).or_default().extend(langs);
+                me.entries
+                    .entry(i.to_ascii_lowercase())
+                    .or_default()
+                    .extend(langs);
             }
         }
         me
@@ -189,7 +203,8 @@ mod tests {
     #[test]
     fn tolerates_garbage_and_wrapped_arrays() {
         assert!(Strings::from_json_bytes(b"not json").is_empty());
-        let wrapped = Strings::from_json_bytes(br#"{ "strings": [ { "Key": "A", "enUS": "B" } ] }"#);
+        let wrapped =
+            Strings::from_json_bytes(br#"{ "strings": [ { "Key": "A", "enUS": "B" } ] }"#);
         assert_eq!(wrapped.get("A", "enUS"), Some("B"));
     }
 

@@ -23,8 +23,8 @@ pub mod table;
 pub use dataset::{Dataset, ModInfo, TableStore};
 pub use itemname::{ItemName, ItemNamer};
 pub use placement::{
-    build_size_map, container_spec_from_tables, validate_body_slots, validate_region, ContainerSpec,
-    Issue, PlacedItem, RegionReport, Severity, ValidationReport,
+    build_size_map, container_spec_from_tables, validate_body_slots, validate_region,
+    ContainerSpec, Issue, PlacedItem, RegionReport, Severity, ValidationReport,
 };
 pub use skillname::SkillNamer;
 pub use strings::Strings;

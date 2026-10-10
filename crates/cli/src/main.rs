@@ -76,7 +76,11 @@ fn arg_of(args: &[String], key: &str) -> Option<String> {
 fn default_strings_dir() -> Option<PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
-        let cand = dir.join("samples").join("game-data").join("lng").join("strings");
+        let cand = dir
+            .join("samples")
+            .join("game-data")
+            .join("lng")
+            .join("strings");
         if cand.is_dir() {
             return Some(cand);
         }
@@ -110,7 +114,9 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
         }
         return;
     }
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut entries: Vec<_> = rd.filter_map(|e| e.ok()).map(|e| e.path()).collect();
     entries.sort();
     for e in entries {
@@ -136,24 +142,44 @@ fn cmd_roundtrip(args: &[String]) -> ExitCode {
     let mut pass = 0usize;
     let mut fail = 0usize;
     for f in &files {
-        let name = f.file_name().unwrap_or_default().to_string_lossy().to_string();
+        let name = f
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
         match SaveFile::open(f) {
             Ok(file) => {
                 let rt = file.check_roundtrip();
                 let items = file.save.items.len();
                 let who = if file.kind == SaveKind::Character {
-                    format!("{} Lv{} {:?}", file.save.name(), file.save.character.level, file.save.character.class)
+                    format!(
+                        "{} Lv{} {:?}",
+                        file.save.name(),
+                        file.save.character.level,
+                        file.save.character.class
+                    )
                 } else if let Some(st) = &file.stash {
-                    format!("共享箱 结构v{} 存档v{} 物品{}", st.structure_version, st.save_version, st.item_count)
+                    format!(
+                        "共享箱 结构v{} 存档v{} 物品{}",
+                        st.structure_version, st.save_version, st.item_count
+                    )
                 } else {
                     "共享箱".to_string()
                 };
                 if rt.identical {
                     pass += 1;
-                    println!("[一致] {name:<30} {:<22} {who:<32} 物品={items:<3} {}", file.version().to_string(), rt);
+                    println!(
+                        "[一致] {name:<30} {:<22} {who:<32} 物品={items:<3} {}",
+                        file.version().to_string(),
+                        rt
+                    );
                 } else {
                     fail += 1;
-                    println!("[失败] {name:<30} {:<22} {who:<32} 物品={items:<3} {}", file.version().to_string(), rt);
+                    println!(
+                        "[失败] {name:<30} {:<22} {who:<32} 物品={items:<3} {}",
+                        file.version().to_string(),
+                        rt
+                    );
                 }
             }
             Err(e) => {
@@ -163,7 +189,11 @@ fn cmd_roundtrip(args: &[String]) -> ExitCode {
         }
     }
     println!("\n合计 {}：一致 {pass}，失败 {fail}", files.len());
-    if fail == 0 { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if fail == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 
 fn cmd_inspect(args: &[String]) -> ExitCode {
@@ -185,7 +215,7 @@ fn cmd_inspect(args: &[String]) -> ExitCode {
     // 名称解析：字符串表 + 暗金/套装表
     let strings_dir = arg_of(args, "--strings")
         .map(PathBuf::from)
-        .or_else(|| default_strings_dir());
+        .or_else(default_strings_dir);
     let mut tables = d2r_data::TableStore::empty();
     if let Some(game) = d2r_data::find_loader_dataset(default_game_dir()) {
         tables = d2r_data::TableStore::new(game.join("data").join("global").join("excel"));
@@ -214,14 +244,33 @@ fn cmd_inspect(args: &[String]) -> ExitCode {
 
     // 共享箱：结构不同，单独输出
     if let Some(st) = &file.stash {
-        println!("文件      : {}", file.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default());
+        println!(
+            "文件      : {}",
+            file.path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        );
         println!("类型      : 共享储物箱（.d2i）");
         println!("结构版本  : {}", st.structure_version);
-        println!("存档版本  : {} (还原值 {})", file.version(), st.save_version);
-        println!("头部声明长度: {}（实际 {}）", st.declared_size, file.original.len());
+        println!(
+            "存档版本  : {} (还原值 {})",
+            file.version(),
+            st.save_version
+        );
+        println!(
+            "头部声明长度: {}（实际 {}）",
+            st.declared_size,
+            file.original.len()
+        );
         println!("名称      : {:?}", st.name);
         println!("金币      : {}", st.gold);
-        println!("物品段    : 偏移 {}，物品数 {}，{} 字节", st.items_offset(), st.item_count, st.items_bytes.len());
+        println!(
+            "物品段    : 偏移 {}，物品数 {}，{} 字节",
+            st.items_offset(),
+            st.item_count,
+            st.items_bytes.len()
+        );
         println!("校验和    : 无（.d2i 不存 CRC，已实测确认）");
         let rt = file.check_roundtrip();
         println!("往返一致  : {}", if rt.identical { "是" } else { "否" });
@@ -294,15 +343,37 @@ fn cmd_inspect(args: &[String]) -> ExitCode {
         });
         println!("{}", serde_json::to_string_pretty(&out).unwrap());
     } else {
-        println!("文件      : {}", file.path.as_ref().map(|p| p.display().to_string()).unwrap_or_default());
+        println!(
+            "文件      : {}",
+            file.path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default()
+        );
         println!("类型      : {:?}", file.kind);
         println!("魔数      : 0x{:08X}", file.header.magic);
-        println!("版本号    : {} (还原值 {})", file.version(), file.header.version);
-        println!("长度字段  : {}（实际 {}，{}）",
-            file.header.file_size, file.original.len(),
-            if file.header.size_matches(file.original.len()) { "一致" } else { "不一致" });
+        println!(
+            "版本号    : {} (还原值 {})",
+            file.version(),
+            file.header.version
+        );
+        println!(
+            "长度字段  : {}（实际 {}，{}）",
+            file.header.file_size,
+            file.original.len(),
+            if file.header.size_matches(file.original.len()) {
+                "一致"
+            } else {
+                "不一致"
+            }
+        );
         println!("校验和    : 0x{:08X}", file.header.checksum);
-        println!("角色      : {} Lv{} {:?}", file.save.name(), file.save.character.level, file.save.character.class);
+        println!(
+            "角色      : {} Lv{} {:?}",
+            file.save.name(),
+            file.save.character.level,
+            file.save.character.class
+        );
         println!("物品数    : {}", file.save.items.len());
         for (i, it) in file.save.items.iter().enumerate().take(30) {
             let p = &it.position;
@@ -319,7 +390,15 @@ fn cmd_inspect(args: &[String]) -> ExitCode {
                 .unwrap_or_default();
             println!(
                 "  [{i:>2}] {:<5} {:<22} {:?} Lv{:<3} {:?} 格=({},{}) 页={:?} 属性={}{note}",
-                it.code.to_string(), display, it.quality, it.level, p.mode, p.inv_x, p.inv_y, p.store_page, it.stats.len()
+                it.code.to_string(),
+                display,
+                it.quality,
+                it.level,
+                p.mode,
+                p.inv_x,
+                p.inv_y,
+                p.store_page,
+                it.stats.len()
             );
         }
         if file.save.items.len() > 30 {
@@ -352,8 +431,11 @@ fn cmd_dataset(args: &[String]) -> ExitCode {
     // 数据集元信息（loader 的 manifest.json 在上一层）
     let manifest = ds_root.join("manifest.json");
     if manifest.is_file() {
-        println!("manifest  : {}（{} 字节）", manifest.display(),
-            std::fs::metadata(&manifest).map(|m| m.len()).unwrap_or(0));
+        println!(
+            "manifest  : {}（{} 字节）",
+            manifest.display(),
+            std::fs::metadata(&manifest).map(|m| m.len()).unwrap_or(0)
+        );
     }
 
     let mut ds = match d2r_data::Dataset::load(&ds_root) {
@@ -366,14 +448,27 @@ fn cmd_dataset(args: &[String]) -> ExitCode {
     let table_names = ds.excel.available();
     println!("excel 表  : {} 张", table_names.len());
     if let Some(base) = &ds.excel_base {
-        println!("原版基准  : {} 张（{}）", base.available().len(), base.dir().map(|d| d.display().to_string()).unwrap_or_default());
+        println!(
+            "原版基准  : {} 张（{}）",
+            base.available().len(),
+            base.dir()
+                .map(|d| d.display().to_string())
+                .unwrap_or_default()
+        );
     }
 
     // 关键表抽查：容器尺寸与属性位宽（数据驱动方案的两块基石）
     for name in ["inventory", "itemstatcost", "armor", "weapons", "misc"] {
         match ds.excel.get(name) {
-            Some(t) => println!("  {name:<14} {:<6} 行  {} 列  源={}", t.len(), t.columns.len(),
-                t.source.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()),
+            Some(t) => println!(
+                "  {name:<14} {:<6} 行  {} 列  源={}",
+                t.len(),
+                t.columns.len(),
+                t.source
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            ),
             None => println!("  {name:<14} 缺失"),
         }
     }
@@ -381,18 +476,32 @@ fn cmd_dataset(args: &[String]) -> ExitCode {
     // 与基准表逐表比对，列出 mod 改动的表（数据驱动适配的目标）
     // 注意：这里的"基准"应指向本地导出结果；loader 自带的 base\ 不是原版表
     // （实测它与本地导出结果有差异），所以标签必须写清楚，避免误判 mod 改动范围。
-    if let Some(base_dir) = ds.excel_base.as_ref().and_then(|b| b.dir()).map(Path::to_path_buf) {
+    if let Some(base_dir) = ds
+        .excel_base
+        .as_ref()
+        .and_then(|b| b.dir())
+        .map(Path::to_path_buf)
+    {
         let mut changed = Vec::new();
         for name in &table_names {
-            let main = ds_root.join("data").join("global").join("excel").join(format!("{name}.txt"));
-            let Some(base) = find_ci(&base_dir, name) else { continue };
+            let main = ds_root
+                .join("data")
+                .join("global")
+                .join("excel")
+                .join(format!("{name}.txt"));
+            let Some(base) = find_ci(&base_dir, name) else {
+                continue;
+            };
             let a = std::fs::read(&main).ok();
             let b = std::fs::read(&base).ok();
             if a != b {
                 changed.push(name.clone());
             }
         }
-        println!("loader base 层差异: {} 张（注意：这是 loader 自己的基准层，不是原版表）", changed.len());
+        println!(
+            "loader base 层差异: {} 张（注意：这是 loader 自己的基准层，不是原版表）",
+            changed.len()
+        );
         if !changed.is_empty() {
             let show: Vec<_> = changed.iter().take(30).cloned().collect();
             println!("  {}", show.join(", "));
@@ -417,7 +526,12 @@ fn cmd_dataset(args: &[String]) -> ExitCode {
         .or_else(|| {
             std::env::current_dir()
                 .ok()
-                .map(|c| c.join("samples").join("game-data").join("lng").join("strings"))
+                .map(|c| {
+                    c.join("samples")
+                        .join("game-data")
+                        .join("lng")
+                        .join("strings")
+                })
                 .filter(|p| p.is_dir())
         });
     if let Some(dir) = strings_dir {
@@ -457,7 +571,11 @@ fn cmd_strings(args: &[String]) -> ExitCode {
         .and_then(|i| args.get(i + 1))
         .cloned()
         .unwrap_or_else(|| "zhCN".to_string());
-    let probes: Vec<&String> = args.iter().skip(1).filter(|a| !a.starts_with("--") && *a != &lang).collect();
+    let probes: Vec<&String> = args
+        .iter()
+        .skip(1)
+        .filter(|a| !a.starts_with("--") && *a != &lang)
+        .collect();
 
     if !dir.is_dir() {
         eprintln!("字符串表目录不存在：{}", dir.display());
@@ -479,7 +597,9 @@ fn cmd_strings(args: &[String]) -> ExitCode {
     }
     if probes.is_empty() {
         // 抽查几个常见键
-        for key in ["qf1", "qf2", "cap", "rvl", "hp1", "cm1", "key", "amu", "zlb"] {
+        for key in [
+            "qf1", "qf2", "cap", "rvl", "hp1", "cm1", "key", "amu", "zlb",
+        ] {
             let zh = strings.get(key, &lang).unwrap_or("<缺失>");
             let en = strings.get(key, "enUS").unwrap_or("<缺失>");
             println!("  {key:<6} {lang}={zh:<18} enUS={en}");
@@ -575,8 +695,16 @@ fn cmd_validate(args: &[String]) -> ExitCode {
                     layout.inventory_rows,
                     layout.stash_cols,
                     layout.stash_rows,
-                    if layout.merc_full_equipment { "是" } else { "否" },
-                    if layout.confirmed_by_user { "（用户确认）" } else { "（默认值，可用 --layout 指定）" }
+                    if layout.merc_full_equipment {
+                        "是"
+                    } else {
+                        "否"
+                    },
+                    if layout.confirmed_by_user {
+                        "（用户确认）"
+                    } else {
+                        "（默认值，可用 --layout 指定）"
+                    }
                 );
                 // 用户已经确认过就不再重复问
                 if !layout.confirmed_by_user {
@@ -626,7 +754,15 @@ fn cmd_validate(args: &[String]) -> ExitCode {
                 ("Stored" | "InBelt", "Inventory") => regions
                     .entry("背包".to_string())
                     .or_default()
-                    .push(d2r_data::PlacedItem { code, name, col: p.inv_x as u32, row: p.inv_y as u32, w, h, cross_panel: false }),
+                    .push(d2r_data::PlacedItem {
+                        code,
+                        name,
+                        col: p.inv_x as u32,
+                        row: p.inv_y as u32,
+                        w,
+                        h,
+                        cross_panel: false,
+                    }),
                 // 合成箱用局部坐标：实测偏移 (12,0) 后与背包物品零冲突
                 ("Stored" | "InBelt", "Cube") => regions
                     .entry("背包".to_string())
@@ -643,18 +779,38 @@ fn cmd_validate(args: &[String]) -> ExitCode {
                 ("Stored" | "InBelt", "Belt") => regions
                     .entry("腰带".to_string())
                     .or_default()
-                    .push(d2r_data::PlacedItem { code, name, col: p.inv_x as u32, row: p.inv_y as u32, w, h, cross_panel: false }),
-                ("Stored", "Stash") => regions
-                    .entry(format!("储物箱 页{page}"))
-                    .or_default()
-                    .push(d2r_data::PlacedItem { code, name, col: p.inv_x as u32, row: p.inv_y as u32, w, h, cross_panel: false }),
+                    .push(d2r_data::PlacedItem {
+                        code,
+                        name,
+                        col: p.inv_x as u32,
+                        row: p.inv_y as u32,
+                        w,
+                        h,
+                        cross_panel: false,
+                    }),
+                ("Stored", "Stash") => regions.entry(format!("储物箱 页{page}")).or_default().push(
+                    d2r_data::PlacedItem {
+                        code,
+                        name,
+                        col: p.inv_x as u32,
+                        row: p.inv_y as u32,
+                        w,
+                        h,
+                        cross_panel: false,
+                    },
+                ),
                 _ => {}
             }
         }
     }
 
     println!("存档      : {target}");
-    println!("角色      : {} Lv{} {}", file.save.name(), file.save.character.level, class);
+    println!(
+        "角色      : {} Lv{} {}",
+        file.save.name(),
+        file.save.character.level,
+        class
+    );
     println!("物品总数  : {}", file.save.items.len());
 
     // 原版背包尺寸（只作参照，不用于判越界：mod 会扩展存储且沿用 Inventory 页）
@@ -666,10 +822,23 @@ fn cmd_validate(args: &[String]) -> ExitCode {
     let mut warns = 0usize;
     for (label, items) in &regions {
         let strict = label != "背包"; // 背包区域混入 mod 扩展存储与合成箱局部坐标
-        let report = d2r_data::validate_region(label.clone(), items, |c| size_map.get(c).copied(), strict);
-        total += report.issues.iter().filter(|i| i.severity() == d2r_data::Severity::Error).count();
-        warns += report.issues.iter().filter(|i| i.severity() == d2r_data::Severity::Warning).count();
-        let status = if report.is_ok() { "通过" } else { "有冲突" };
+        let report =
+            d2r_data::validate_region(label.clone(), items, |c| size_map.get(c).copied(), strict);
+        total += report
+            .issues
+            .iter()
+            .filter(|i| i.severity() == d2r_data::Severity::Error)
+            .count();
+        warns += report
+            .issues
+            .iter()
+            .filter(|i| i.severity() == d2r_data::Severity::Warning)
+            .count();
+        let status = if report.is_ok() {
+            "通过"
+        } else {
+            "有冲突"
+        };
         println!(
             "\n{label}: {} 件，坐标范围 {}×{}，占用 {} 格 → {status}",
             report.checked, report.extent.0, report.extent.1, report.used_cells
@@ -702,7 +871,11 @@ fn cmd_validate(args: &[String]) -> ExitCode {
     }
 
     println!("\n合计确定问题: {total}，提示: {warns}");
-    if total == 0 { ExitCode::SUCCESS } else { ExitCode::from(1) }
+    if total == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    }
 }
 fn cmd_edit(args: &[String]) -> ExitCode {
     let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
@@ -747,7 +920,15 @@ fn cmd_edit(args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    println!("修改前    : Lv{} 力量{} 敏捷{} 体力{} 精力{} 金币{}", before.level, before.strength, before.dexterity, before.vitality, before.energy, before.gold);
+    println!(
+        "修改前    : Lv{} 力量{} 敏捷{} 体力{} 精力{} 金币{}",
+        before.level,
+        before.strength,
+        before.dexterity,
+        before.vitality,
+        before.energy,
+        before.gold
+    );
 
     if let Err(e) = ws.apply(&edits) {
         eprintln!("修改被拒绝：{e}");
@@ -764,10 +945,18 @@ fn cmd_edit(args: &[String]) -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    println!("修改后    : Lv{} 力量{} 敏捷{} 体力{} 精力{} 金币{}", after.level, after.strength, after.dexterity, after.vitality, after.energy, after.gold);
+    println!(
+        "修改后    : Lv{} 力量{} 敏捷{} 体力{} 精力{} 金币{}",
+        after.level, after.strength, after.dexterity, after.vitality, after.energy, after.gold
+    );
 
     match ws.verify() {
-        Ok(v) => println!("写前校验  : {}（{} 字节）{}", if v.ok { "通过" } else { "未通过" }, v.bytes, v.message),
+        Ok(v) => println!(
+            "写前校验  : {}（{} 字节）{}",
+            if v.ok { "通过" } else { "未通过" },
+            v.bytes,
+            v.message
+        ),
         Err(e) => println!("写前校验  : 失败 {e}"),
     }
 
@@ -787,7 +976,11 @@ fn cmd_edit(args: &[String]) -> ExitCode {
                 r.bytes,
                 r.edits,
                 ws.pending_item_edits(),
-                if r.backed_up { "，已备份原文件" } else { "" }
+                if r.backed_up {
+                    "，已备份原文件"
+                } else {
+                    ""
+                }
             );
             ExitCode::SUCCESS
         }
@@ -836,23 +1029,70 @@ fn cmd_view(args: &[String]) -> ExitCode {
     }
 
     println!("存档      : {}", info.path);
-    println!("版本      : {}｜{} 字节｜往返一致 {}", info.version, info.size, if info.roundtrip_identical { "是" } else { "否" });
-    println!("数据集    : {} 张表｜字符串 {} 条", ws.dataset_info().tables, ws.dataset_info().strings);
+    println!(
+        "版本      : {}｜{} 字节｜往返一致 {}",
+        info.version,
+        info.size,
+        if info.roundtrip_identical {
+            "是"
+        } else {
+            "否"
+        }
+    );
+    println!(
+        "数据集    : {} 张表｜字符串 {} 条",
+        ws.dataset_info().tables,
+        ws.dataset_info().strings
+    );
     println!("角色      : {} {} Lv{}", char.name, char.class, char.level);
-    println!("属性      : 力量{} 敏捷{} 体力{} 精力{}（剩余点 {}）", char.strength, char.dexterity, char.vitality, char.energy, char.stat_points);
-    println!("资源      : 生命{}/{} 法力{}/{} 体力{}｜经验{}｜金币{}+箱{}",
-        char.life, char.max_life, char.mana, char.max_mana, char.stamina, char.experience, char.gold, char.stash_gold);
+    println!(
+        "属性      : 力量{} 敏捷{} 体力{} 精力{}（剩余点 {}）",
+        char.strength, char.dexterity, char.vitality, char.energy, char.stat_points
+    );
+    println!(
+        "资源      : 生命{}/{} 法力{}/{} 体力{}｜经验{}｜金币{}+箱{}",
+        char.life,
+        char.max_life,
+        char.mana,
+        char.max_mana,
+        char.stamina,
+        char.experience,
+        char.gold,
+        char.stash_gold
+    );
 
     let learned: Vec<_> = skills.iter().filter(|s| s.level > 0).collect();
-    println!("\n技能      : {} 个已加点 / 共 {} 槽位", learned.len(), skills.len());
+    println!(
+        "\n技能      : {} 个已加点 / 共 {} 槽位",
+        learned.len(),
+        skills.len()
+    );
     for s in learned.iter().take(30) {
-        println!("  {:<16} Lv{}（槽位 {}，ID {:?}）", s.name.clone().unwrap_or_else(|| "未命名".into()), s.level, s.index, s.skill_id);
+        println!(
+            "  {:<16} Lv{}（槽位 {}，ID {:?}）",
+            s.name.clone().unwrap_or_else(|| "未命名".into()),
+            s.level,
+            s.index,
+            s.skill_id
+        );
     }
 
     println!("\n传送点");
     for w in &waypoints {
-        let on: Vec<String> = w.active.iter().enumerate().filter(|(_, a)| **a).map(|(i, _)| i.to_string()).collect();
-        println!("  {:<4} 开通 {}/{}：{}", w.difficulty, on.len(), w.active.len(), on.join(","));
+        let on: Vec<String> = w
+            .active
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| **a)
+            .map(|(i, _)| i.to_string())
+            .collect();
+        println!(
+            "  {:<4} 开通 {}/{}：{}",
+            w.difficulty,
+            on.len(),
+            w.active.len(),
+            on.join(",")
+        );
     }
 
     println!("\n物品      : {} 件", items.len());
@@ -864,15 +1104,28 @@ fn cmd_view(args: &[String]) -> ExitCode {
         println!("  {page:<12} {n} 件");
     }
     if let Ok(st) = ws.item_stats() {
-        println!("  品质分布  : {}", st.by_quality.iter().map(|(q, n)| format!("{q} {n}")).collect::<Vec<_>>().join("｜"));
-        println!("  已装备 {} 件，含镶嵌物 {} 件", st.equipped, st.with_sockets);
+        println!(
+            "  品质分布  : {}",
+            st.by_quality
+                .iter()
+                .map(|(q, n)| format!("{q} {n}"))
+                .collect::<Vec<_>>()
+                .join("｜")
+        );
+        println!(
+            "  已装备 {} 件，含镶嵌物 {} 件",
+            st.equipped, st.with_sockets
+        );
     }
     ExitCode::SUCCESS
 }
 fn cmd_items(args: &[String]) -> ExitCode {
     let json = args.iter().any(|a| a == "--json");
     let filter = arg_of(args, "--filter");
-    let Some(target) = args.iter().find(|a| !a.starts_with("--") && arg_of(args, "--filter").as_deref() != Some(a.as_str())) else {
+    let Some(target) = args
+        .iter()
+        .find(|a| !a.starts_with("--") && arg_of(args, "--filter").as_deref() != Some(a.as_str()))
+    else {
         eprintln!("用法: d2r items <文件.d2s> [--filter 关键字] [--json]");
         return ExitCode::from(2);
     };
@@ -892,7 +1145,9 @@ fn cmd_items(args: &[String]) -> ExitCode {
         Some(f) => {
             let key = f.to_lowercase();
             all.iter()
-                .filter(|i| i.code.to_lowercase().contains(&key) || i.name.to_lowercase().contains(&key))
+                .filter(|i| {
+                    i.code.to_lowercase().contains(&key) || i.name.to_lowercase().contains(&key)
+                })
                 .cloned()
                 .collect()
         }
@@ -916,8 +1171,22 @@ fn cmd_items(args: &[String]) -> ExitCode {
             "物品      : {} 件｜已装备 {}｜含镶嵌物 {}",
             st.total, st.equipped, st.with_sockets
         );
-        println!("  存储页  : {}", st.by_page.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join("｜"));
-        println!("  品质    : {}", st.by_quality.iter().map(|(k, v)| format!("{k} {v}")).collect::<Vec<_>>().join("｜"));
+        println!(
+            "  存储页  : {}",
+            st.by_page
+                .iter()
+                .map(|(k, v)| format!("{k} {v}"))
+                .collect::<Vec<_>>()
+                .join("｜")
+        );
+        println!(
+            "  品质    : {}",
+            st.by_quality
+                .iter()
+                .map(|(k, v)| format!("{k} {v}"))
+                .collect::<Vec<_>>()
+                .join("｜")
+        );
     }
     if filter.is_some() {
         println!("过滤      : {filter:?} → {} 件", items.len());
@@ -934,10 +1203,21 @@ fn cmd_items(args: &[String]) -> ExitCode {
             (Some(c), None) => format!("{c}"),
             _ => "-".to_string(),
         };
-        let qty = it.quantity.map(|q| q.to_string()).unwrap_or_else(|| "-".into());
-        let sockets = if it.socket_count > 0 { it.socket_count.to_string() } else { "-".into() };
+        let qty = it
+            .quantity
+            .map(|q| q.to_string())
+            .unwrap_or_else(|| "-".into());
+        let sockets = if it.socket_count > 0 {
+            it.socket_count.to_string()
+        } else {
+            "-".into()
+        };
         let place = if it.body_location != "None" {
-            format!("{}·{}", short_page(&it.store_page), short_slot(&it.body_location))
+            format!(
+                "{}·{}",
+                short_page(&it.store_page),
+                short_slot(&it.body_location)
+            )
         } else {
             short_page(&it.store_page).to_string()
         };
@@ -954,7 +1234,11 @@ fn cmd_items(args: &[String]) -> ExitCode {
             dur,
             qty,
             sockets,
-            if it.name_resolved { "" } else { "  (名字未解析)" }
+            if it.name_resolved {
+                ""
+            } else {
+                "  (名字未解析)"
+            }
         );
     }
     ExitCode::SUCCESS
@@ -1001,10 +1285,16 @@ fn truncate(s: &str, max: usize) -> String {
         format!("{}…", chars[..max - 1].iter().collect::<String>())
     }
 }
-fn find_ci(dir: &Path, stem: &str) -> Option<PathBuf> {    let wanted = format!("{stem}.txt");
+fn find_ci(dir: &Path, stem: &str) -> Option<PathBuf> {
+    let wanted = format!("{stem}.txt");
     std::fs::read_dir(dir)
         .ok()?
         .flatten()
         .map(|e| e.path())
-        .find(|p| p.file_name().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case(&wanted)).unwrap_or(false))
+        .find(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .map(|s| s.eq_ignore_ascii_case(&wanted))
+                .unwrap_or(false)
+        })
 }

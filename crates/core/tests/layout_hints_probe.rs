@@ -11,7 +11,9 @@ fn print_hints_for_samples() {
     let dir = repo.join("samples").join("saves").join("d2r-105");
     for name in ["杜仲", "杜老五", "小五", "blank-testnew", "aruisi"] {
         let p = dir.join(format!("{name}.d2s"));
-        let Ok(session) = d2r_core::EditSession::open(&p) else { continue };
+        let Ok(session) = d2r_core::EditSession::open(&p) else {
+            continue;
+        };
         let h = session.layout_hints();
         let questions = d2r_core::needs_confirmation(&h);
         println!(

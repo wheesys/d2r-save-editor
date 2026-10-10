@@ -16,16 +16,16 @@
 
 pub mod d2i;
 pub mod edit;
+pub mod header;
 pub mod items;
 pub mod layout;
-pub mod header;
 pub mod save;
 
 pub use d2i::{D2iError, SharedStash};
 pub use edit::{CharacterView, Edit, EditError, EditSession, SkillView};
+pub use header::{HeaderError, SaveHeader, SaveVersion, MAGIC};
 pub use items::{BoundsIssue, ItemDetail, ItemEdit, ItemStats};
 pub use layout::{needs_confirmation, LayoutHints, LayoutSettings};
-pub use header::{HeaderError, SaveHeader, SaveVersion, MAGIC};
 pub use save::{RoundTrip, SaveError, SaveFile, SaveKind};
 
 /// 编译期版本信息。

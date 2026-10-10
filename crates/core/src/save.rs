@@ -23,7 +23,12 @@ pub enum SaveKind {
 impl SaveKind {
     /// 按扩展名判断。
     pub fn from_path(path: &Path) -> Option<Self> {
-        match path.extension().and_then(|e| e.to_str())?.to_ascii_lowercase().as_str() {
+        match path
+            .extension()
+            .and_then(|e| e.to_str())?
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "d2s" => Some(Self::Character),
             "d2i" => Some(Self::Stash),
             _ => None,
@@ -66,8 +71,10 @@ impl SaveFile {
     /// 从磁盘读取。
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SaveError> {
         let path = path.as_ref();
-        let kind = SaveKind::from_path(path).ok_or_else(|| SaveError::UnknownKind(path.to_path_buf()))?;
-        let bytes = std::fs::read(path).map_err(|e| SaveError::Io(path.to_path_buf(), e.to_string()))?;
+        let kind =
+            SaveKind::from_path(path).ok_or_else(|| SaveError::UnknownKind(path.to_path_buf()))?;
+        let bytes =
+            std::fs::read(path).map_err(|e| SaveError::Io(path.to_path_buf(), e.to_string()))?;
         let mut me = Self::from_bytes(kind, bytes).map_err(|e| e.with_path(path))?;
         me.path = Some(path.to_path_buf());
         Ok(me)
@@ -79,13 +86,28 @@ impl SaveFile {
         // `.d2i` 的段结构与 `.d2s` 不同（没有任务/传送点/属性/技能段），
         // 必须走共享箱解析器；d2s 解析库对它会报 "invalid quest section magic"。
         if kind == SaveKind::Stash {
-            let stash = crate::d2i::SharedStash::parse(&bytes).map_err(|e| SaveError::Parse(e.to_string()))?;
+            let stash = crate::d2i::SharedStash::parse(&bytes)
+                .map_err(|e| SaveError::Parse(e.to_string()))?;
             // `save` 字段仅为兼容既有接口；共享箱的真实数据在 `stash`，写回也走 `stash`。
             let save = d2s::D2Save::from_bytes(&bytes).unwrap_or_default();
-            return Ok(Self { path: None, kind, header, original: bytes, save, stash: Some(stash) });
+            return Ok(Self {
+                path: None,
+                kind,
+                header,
+                original: bytes,
+                save,
+                stash: Some(stash),
+            });
         }
         let save = d2s::D2Save::from_bytes(&bytes).map_err(|e| SaveError::Parse(e.to_string()))?;
-        Ok(Self { path: None, kind, header, original: bytes, save, stash: None })
+        Ok(Self {
+            path: None,
+            kind,
+            header,
+            original: bytes,
+            save,
+            stash: None,
+        })
     }
 
     /// 存档版本。
@@ -107,7 +129,9 @@ impl SaveFile {
         if let Some(stash) = &self.stash {
             return Ok(stash.to_bytes());
         }
-        self.save.to_bytes().map_err(|e| SaveError::Write(e.to_string()))
+        self.save
+            .to_bytes()
+            .map_err(|e| SaveError::Write(e.to_string()))
     }
 
     /// 原样写回的往返校验。
@@ -116,7 +140,13 @@ impl SaveFile {
     pub fn check_roundtrip(&self) -> RoundTrip {
         match self.to_bytes() {
             Ok(rewritten) => RoundTrip::compare(&self.original, &rewritten),
-            Err(e) => RoundTrip { identical: false, original_len: self.original.len(), rewritten_len: 0, first_diff: None, error: Some(e.to_string()) },
+            Err(e) => RoundTrip {
+                identical: false,
+                original_len: self.original.len(),
+                rewritten_len: 0,
+                first_diff: None,
+                error: Some(e.to_string()),
+            },
         }
     }
 }
@@ -139,13 +169,20 @@ pub struct RoundTrip {
 impl RoundTrip {
     /// 比对两份字节。
     pub fn compare(original: &[u8], rewritten: &[u8]) -> Self {
-        let first_diff = original.iter().zip(rewritten.iter()).position(|(a, b)| a != b);
+        let first_diff = original
+            .iter()
+            .zip(rewritten.iter())
+            .position(|(a, b)| a != b);
         let identical = original == rewritten;
         Self {
             identical,
             original_len: original.len(),
             rewritten_len: rewritten.len(),
-            first_diff: if identical { None } else { first_diff.or(Some(original.len().min(rewritten.len()))) },
+            first_diff: if identical {
+                None
+            } else {
+                first_diff.or(Some(original.len().min(rewritten.len())))
+            },
             error: None,
         }
     }
@@ -225,8 +262,14 @@ mod tests {
 
     #[test]
     fn kind_by_extension() {
-        assert_eq!(SaveKind::from_path(Path::new("a.d2s")), Some(SaveKind::Character));
-        assert_eq!(SaveKind::from_path(Path::new("A.D2I")), Some(SaveKind::Stash));
+        assert_eq!(
+            SaveKind::from_path(Path::new("a.d2s")),
+            Some(SaveKind::Character)
+        );
+        assert_eq!(
+            SaveKind::from_path(Path::new("A.D2I")),
+            Some(SaveKind::Stash)
+        );
         assert_eq!(SaveKind::from_path(Path::new("a.txt")), None);
     }
 

@@ -21,7 +21,9 @@ fn samples_root() -> Option<PathBuf> {
 
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -46,7 +48,9 @@ fn hints_are_produced_for_real_saves() {
     }
     let mut with_coords = 0;
     for p in &files {
-        let Ok(session) = EditSession::open(p) else { continue };
+        let Ok(session) = EditSession::open(p) else {
+            continue;
+        };
         let h = session.layout_hints();
         // 只要存档里有存放类物品，就应该推断出坐标上限
         if h.inventory_max.is_some() || h.stash_max.is_some() {
@@ -108,8 +112,14 @@ fn user_confirmed_layout_makes_bounds_reliable() {
 
     // 3) 确认之后不该再问同样的问题
     let questions_when_unconfirmed = needs_confirmation(&hints);
-    assert!(!questions_when_unconfirmed.is_empty(), "扩展存档应产生待确认项");
-    let confirmed = LayoutSettings { confirmed_by_user: true, ..fitted.clone() };
+    assert!(
+        !questions_when_unconfirmed.is_empty(),
+        "扩展存档应产生待确认项"
+    );
+    let confirmed = LayoutSettings {
+        confirmed_by_user: true,
+        ..fitted.clone()
+    };
     assert!(confirmed.confirmed_by_user);
 }
 
@@ -117,7 +127,9 @@ fn user_confirmed_layout_makes_bounds_reliable() {
 fn empty_merc_section_does_not_ask() {
     let Some(root) = samples_root() else { return };
     for p in walk(&root) {
-        let Ok(session) = EditSession::open(&p) else { continue };
+        let Ok(session) = EditSession::open(&p) else {
+            continue;
+        };
         let h = session.layout_hints();
         if h.merc_section && h.merc_items == 0 {
             let qs = needs_confirmation(&h);

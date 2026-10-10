@@ -147,10 +147,16 @@ mod tests {
 
     #[test]
     fn rejects_short_and_bad_magic() {
-        assert_eq!(SaveHeader::parse_checked(&[0u8; 8]), Err(HeaderError::TooShort(8)));
+        assert_eq!(
+            SaveHeader::parse_checked(&[0u8; 8]),
+            Err(HeaderError::TooShort(8))
+        );
         let mut bytes = sample(105, 16, 0);
         bytes[0] = 0;
-        assert!(matches!(SaveHeader::parse_checked(&bytes), Err(HeaderError::BadMagic(_))));
+        assert!(matches!(
+            SaveHeader::parse_checked(&bytes),
+            Err(HeaderError::BadMagic(_))
+        ));
     }
 
     #[test]

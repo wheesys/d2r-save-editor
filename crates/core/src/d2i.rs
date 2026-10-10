@@ -91,7 +91,10 @@ impl SharedStash {
     /// 解析 `.d2i`。
     pub fn parse(bytes: &[u8]) -> Result<Self, D2iError> {
         if bytes.len() < 68 {
-            return Err(D2iError::TooShort { len: bytes.len(), need: 68 });
+            return Err(D2iError::TooShort {
+                len: bytes.len(),
+                need: 68,
+            });
         }
         let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         if magic != MAGIC {
@@ -101,7 +104,10 @@ impl SharedStash {
         let save_version = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
         let declared_size = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]);
         let name_raw = &bytes[16..48];
-        let name_end = name_raw.iter().position(|b| *b == 0).unwrap_or(name_raw.len());
+        let name_end = name_raw
+            .iter()
+            .position(|b| *b == 0)
+            .unwrap_or(name_raw.len());
         let name = String::from_utf8_lossy(&name_raw[..name_end]).to_string();
         let gold = u32::from_le_bytes([bytes[48], bytes[49], bytes[50], bytes[51]]);
 
@@ -194,7 +200,10 @@ mod tests {
         let mut s = SharedStash::parse(&bytes).unwrap();
         s.set_gold(999);
         let out = s.to_bytes();
-        assert_eq!(u32::from_le_bytes([out[48], out[49], out[50], out[51]]), 999);
+        assert_eq!(
+            u32::from_le_bytes([out[48], out[49], out[50], out[51]]),
+            999
+        );
         // 除金币 4 字节外其余不变
         let mut expect = bytes.clone();
         expect[48..52].copy_from_slice(&999u32.to_le_bytes());
@@ -203,10 +212,16 @@ mod tests {
 
     #[test]
     fn rejects_bad_magic_and_short_files() {
-        assert!(matches!(SharedStash::parse(&[0u8; 10]), Err(D2iError::TooShort { .. })));
+        assert!(matches!(
+            SharedStash::parse(&[0u8; 10]),
+            Err(D2iError::TooShort { .. })
+        ));
         let mut bytes = build(0, &[]);
         bytes[0] = 0;
-        assert!(matches!(SharedStash::parse(&bytes), Err(D2iError::BadMagic(_))));
+        assert!(matches!(
+            SharedStash::parse(&bytes),
+            Err(D2iError::BadMagic(_))
+        ));
     }
 
     #[test]
@@ -215,6 +230,9 @@ mod tests {
         // 抹掉 JM
         bytes[64] = 0;
         bytes[65] = 0;
-        assert!(matches!(SharedStash::parse(&bytes), Err(D2iError::Malformed(_))));
+        assert!(matches!(
+            SharedStash::parse(&bytes),
+            Err(D2iError::Malformed(_))
+        ));
     }
 }

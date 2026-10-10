@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的 tag（例如 v0.1.0）"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # CI 上没有游戏数据：只产出"可启动但无内置数据"的 exe。
+  # 带数据的 exe 由维护者在本机用 tools/package.ps1 打包（数据不进仓库）。
+  D2R_ALLOW_NO_BUNDLE: "1"
+
+jobs:
+  build-windows:
+    name: Windows x64 exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "desktop/src-tauri -> desktop/src-tauri/target"
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 构建前端
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: 构建桌面端（release）
+        working-directory: desktop/src-tauri
+        run: cargo build --release
+
+      - name: 收集产物
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $out = "D2RSaveEditor-$version-win-x64.exe"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item desktop/src-tauri/target/release/d2r-desktop.exe "dist/$out"
+          Get-Item "dist/$out" | Format-List Name, Length
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: dist/*.exe
+          if-no-files-found: error
+
+      - name: 发布到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.exe
+          generate_release_notes: true
+          body: |
+            本构建来自公开 CI，**不含内置游戏数据**（仓库不存放数据）：
+            解压后可以直接启动、可以打开存档并浏览，但物品名/技能名等会退化成代码，
+            容器尺寸等需要在内置数据齐全时才精确。
+
+            带完整内置数据的版本由维护者在本机打包分发，见 README 的"发布"一节。

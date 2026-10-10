@@ -20,7 +20,9 @@ fn samples_root() -> Option<PathBuf> {
 
 fn walk(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let Ok(rd) = std::fs::read_dir(dir) else { return out };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
@@ -80,12 +82,21 @@ fn item_edits_persist_and_verify() {
     let total_before = details.len();
 
     // 找一件有数量的物品和一件有耐久的物品
-    let qty_idx = details.iter().find(|d| d.quantity.is_some()).map(|d| d.index);
-    let dur_idx = details.iter().find(|d| d.max_durability.unwrap_or(0) > 0).map(|d| d.index);
+    let qty_idx = details
+        .iter()
+        .find(|d| d.quantity.is_some())
+        .map(|d| d.index);
+    let dur_idx = details
+        .iter()
+        .find(|d| d.max_durability.unwrap_or(0) > 0)
+        .map(|d| d.index);
 
     let mut edits = Vec::new();
     if let Some(i) = qty_idx {
-        edits.push(ItemEdit::SetQuantity { index: i, value: 123 });
+        edits.push(ItemEdit::SetQuantity {
+            index: i,
+            value: 123,
+        });
     }
     if let Some(i) = dur_idx {
         edits.push(ItemEdit::SetDurability { index: i, value: 1 });
@@ -132,8 +143,14 @@ fn item_edits_are_atomic_and_bounded() {
         .map(|d| (d.index, d.max_durability.unwrap()))
         .unwrap_or((0, 0));
     let r = session.apply_items(&[
-        ItemEdit::SetDefense { index: 0, value: 42 },
-        ItemEdit::SetDurability { index: dur.0, value: dur.1 + 1000 },
+        ItemEdit::SetDefense {
+            index: 0,
+            value: 42,
+        },
+        ItemEdit::SetDurability {
+            index: dur.0,
+            value: dur.1 + 1000,
+        },
     ]);
     assert!(r.is_err(), "超上限必须被拒绝");
 
@@ -143,7 +160,10 @@ fn item_edits_are_atomic_and_bounded() {
 
     // 越界序号也要被拒绝
     assert!(session
-        .apply_item(ItemEdit::SetQuantity { index: 99999, value: 2 })
+        .apply_item(ItemEdit::SetQuantity {
+            index: 99999,
+            value: 2
+        })
         .is_err());
 }
 

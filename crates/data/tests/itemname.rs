@@ -29,7 +29,11 @@ fn setup(tag: &str) -> (Strings, TableStore) {
     )
     .unwrap();
     // Sets 第 1 列 index 本身就是字符串名（真实文件即如此）
-    std::fs::write(dir.join("Sets.txt"), "index\tname\nAngelical Raiment\tAngelical Raiment\n").unwrap();
+    std::fs::write(
+        dir.join("Sets.txt"),
+        "index\tname\nAngelical Raiment\tAngelical Raiment\n",
+    )
+    .unwrap();
     (strings, TableStore::new(dir))
 }
 

@@ -54,7 +54,11 @@ pub struct ItemDetail {
 
 /// 一条物品改动指令。
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ItemEdit {
     /// 设置当前耐久（0..=max）。
     SetDurability {
@@ -132,7 +136,15 @@ impl std::fmt::Display for BoundsIssue {
         write!(
             f,
             "[{}] {} 在{}的 ({},{}) 占 {}×{}，超出容器 {}×{}",
-            self.index, self.code, self.page, self.at.0, self.at.1, self.size.0, self.size.1, self.container.0, self.container.1
+            self.index,
+            self.code,
+            self.page,
+            self.at.0,
+            self.at.1,
+            self.size.0,
+            self.size.1,
+            self.container.0,
+            self.container.1
         )
     }
 }
@@ -161,12 +173,12 @@ impl EditSession {
 
     /// 取某个物品的明细。
     pub fn item_detail(&self, index: usize) -> Result<ItemDetail, EditError> {
-        let item = self
-            .file
-            .save
-            .items
-            .get(index)
-            .ok_or_else(|| EditError::Invalid(format!("物品序号 {index} 越界（共 {} 件）", self.item_count())))?;
+        let item = self.file.save.items.get(index).ok_or_else(|| {
+            EditError::Invalid(format!(
+                "物品序号 {index} 越界（共 {} 件）",
+                self.item_count()
+            ))
+        })?;
         let p: &ItemPosition = &item.position;
         Ok(ItemDetail {
             index,
@@ -185,14 +197,20 @@ impl EditSession {
             quantity: item.quantity,
             socket_count: item.sockets.len(),
             socketed_count: item.sockets.iter().filter(|s| s.is_some()).count(),
-            stats: item.stats.iter().map(|s| (s.id.0, s.value, s.layer)).collect(),
+            stats: item
+                .stats
+                .iter()
+                .map(|s| (s.id.0, s.value, s.layer))
+                .collect(),
             runeword_id: item.runeword_id,
         })
     }
 
     /// 全部物品明细。
     pub fn item_details(&self) -> Vec<ItemDetail> {
-        (0..self.item_count()).filter_map(|i| self.item_detail(i).ok()).collect()
+        (0..self.item_count())
+            .filter_map(|i| self.item_detail(i).ok())
+            .collect()
     }
 
     /// 汇总统计。
@@ -202,7 +220,9 @@ impl EditSession {
         let mut equipped = 0;
         let mut with_sockets = 0;
         for it in &self.file.save.items {
-            *by_page.entry(format!("{:?}", it.position.store_page)).or_default() += 1;
+            *by_page
+                .entry(format!("{:?}", it.position.store_page))
+                .or_default() += 1;
             *by_quality.entry(format!("{:?}", it.quality)).or_default() += 1;
             if format!("{:?}", it.position.mode) == "Equipped" {
                 equipped += 1;
@@ -345,13 +365,17 @@ impl EditSession {
             }
             ItemEdit::SetQuantity { index, value } => {
                 if *value < 1 || *value > 511 {
-                    return Err(EditError::Invalid(format!("堆叠数量必须在 1–511（收到 {value}）")));
+                    return Err(EditError::Invalid(format!(
+                        "堆叠数量必须在 1–511（收到 {value}）"
+                    )));
                 }
                 self.item_mut(*index)?.quantity = Some(*value);
             }
             ItemEdit::SetDefense { index, value } => {
                 if *value < 0 || *value > 65535 {
-                    return Err(EditError::Invalid(format!("防御值必须在 0–65535（收到 {value}）")));
+                    return Err(EditError::Invalid(format!(
+                        "防御值必须在 0–65535（收到 {value}）"
+                    )));
                 }
                 self.item_mut(*index)?.defense = Some(*value);
             }
@@ -360,7 +384,11 @@ impl EditSession {
                 let id = StatId(*stat);
                 match item.stats.iter_mut().find(|s| s.id == id && s.layer == 0) {
                     Some(existing) => existing.value = *value,
-                    None => item.stats.push(Stat { id, value: *value, layer: 0 }),
+                    None => item.stats.push(Stat {
+                        id,
+                        value: *value,
+                        layer: 0,
+                    }),
                 }
             }
             ItemEdit::RemoveStat { index, stat } => {
@@ -409,11 +437,12 @@ impl EditSession {
     }
 
     fn item(&self, index: usize) -> Result<&d2s::Item, EditError> {
-        self.file
-            .save
-            .items
-            .get(index)
-            .ok_or_else(|| EditError::Invalid(format!("物品序号 {index} 越界（共 {} 件）", self.item_count())))
+        self.file.save.items.get(index).ok_or_else(|| {
+            EditError::Invalid(format!(
+                "物品序号 {index} 越界（共 {} 件）",
+                self.item_count()
+            ))
+        })
     }
 
     fn item_mut(&mut self, index: usize) -> Result<&mut d2s::Item, EditError> {

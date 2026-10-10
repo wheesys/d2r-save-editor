@@ -47,7 +47,24 @@ pwsh -File tools/package.ps1 -AlsoZip         # 额外再打一个 zip（含说�
 数据在构建期**先压缩再内嵌**（文本数据能压到约 18%），所以 exe 体积远小于"数据原样内嵌"。
 release 构建在缺少本地数据时会**直接失败**，避免发出打开就没数据的包。
 
-> 提醒：exe 内含游戏数据，请只在自己的范围内分发，不要上传到公开仓库或公开 Release。
+### 发布到 GitHub Release
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0      # 触发 .github/workflows/release.yml
+```
+
+CI 构建并上传一个 exe 到 Release。**CI 上没有游戏数据**（仓库不存放），
+所以 CI 产出的 exe、以及源码构建出来的 exe，都只有程序本体：可以启动、打开存档，
+但物品名/技能名会退化成代码。
+
+要发布带完整数据的版本，用本机打包的产物：
+
+```powershell
+pwsh -File tools/package.ps1        # dist/D2RSaveEditor-<版本>-win-x64.exe
+```
+
+两种 exe 都以"公开 Release 资产"的形式分发，或私下传递。
 
 ## 开发
 

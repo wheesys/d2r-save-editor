@@ -173,7 +173,14 @@ impl Issue {
 impl std::fmt::Display for Issue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Overlap { index, name, other_index, other_name, cell, severity } => {
+            Self::Overlap {
+                index,
+                name,
+                other_index,
+                other_name,
+                cell,
+                severity,
+            } => {
                 let tag = match severity {
                     Severity::Error => "重叠",
                     Severity::Warning => "疑似重叠（跨面板坐标待确认）",
@@ -187,7 +194,11 @@ impl std::fmt::Display for Issue {
             Self::UnknownSize { index, code } => {
                 write!(f, "[{index}] 物品代码 {code} 取不到尺寸（数据集不匹配？）")
             }
-            Self::DuplicateBodySlot { slot, first, second } => {
+            Self::DuplicateBodySlot {
+                slot,
+                first,
+                second,
+            } => {
                 write!(f, "装备位 {slot} 被两件物品占用：{first} / {second}")
             }
         }
@@ -223,7 +234,10 @@ pub fn validate_region(
         let size = size_lookup(&it.code);
         let (w, h) = size.unwrap_or((it.w.max(1), it.h.max(1)));
         if size.is_none() {
-            issues.push(Issue::UnknownSize { index: i, code: it.code.clone() });
+            issues.push(Issue::UnknownSize {
+                index: i,
+                code: it.code.clone(),
+            });
         }
         let mut reported = std::collections::HashSet::new();
         for dy in 0..h {
@@ -234,7 +248,8 @@ pub fn validate_region(
                         // 同一对物品只报一次，避免大物品刷屏
                         if reported.insert(other) {
                             // 跨面板（坐标语义未证实）只报提示
-                            let severity = if !strict || it.cross_panel || items[other].cross_panel {
+                            let severity = if !strict || it.cross_panel || items[other].cross_panel
+                            {
                                 Severity::Warning
                             } else {
                                 Severity::Error
@@ -292,17 +307,25 @@ pub fn validate_body_slots(equipped: &[(String, String)]) -> Vec<Issue> {
 /// 一次读齐成 map，避免逐件 IO；同时可用于界面显示占格。
 pub fn build_size_map(excel_dir: &std::path::Path) -> BTreeMap<String, (u32, u32)> {
     let mut map = BTreeMap::new();
-    let Ok(rd) = std::fs::read_dir(excel_dir) else { return map };
+    let Ok(rd) = std::fs::read_dir(excel_dir) else {
+        return map;
+    };
     let wanted = ["armor", "weapons", "misc"];
     for entry in rd.flatten() {
         let path = entry.path();
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
         if !wanted.contains(&stem.to_ascii_lowercase().as_str()) {
             continue;
         }
-        let Ok(t) = crate::table::Table::from_file(&path) else { continue };
+        let Ok(t) = crate::table::Table::from_file(&path) else {
+            continue;
+        };
         for row in 0..t.len() {
-            let Some(code) = t.cell_nonempty(row, "code") else { continue };
+            let Some(code) = t.cell_nonempty(row, "code") else {
+                continue;
+            };
             let w = t.int(row, "invwidth").unwrap_or(1).max(1) as u32;
             let h = t.int(row, "invheight").unwrap_or(1).max(1) as u32;
             map.insert(code.to_string(), (w, h));
@@ -338,7 +361,10 @@ pub fn container_spec_from_tables(
 ) -> Option<ContainerSpec> {
     let t = tables.get("inventory")?;
     let row = t.find_row_by("class", row_name)?;
-    let get = |col: &str| t.cell_nonempty(row, col).and_then(|v| v.parse::<u32>().ok());
+    let get = |col: &str| {
+        t.cell_nonempty(row, col)
+            .and_then(|v| v.parse::<u32>().ok())
+    };
     Some(ContainerSpec {
         cols: get("gridX")?,
         rows: get("gridY")?,
@@ -352,12 +378,24 @@ mod tests {
     use super::*;
 
     fn item(code: &str, col: u32, row: u32, w: u32, h: u32) -> PlacedItem {
-        PlacedItem { code: code.into(), name: code.into(), col, row, w, h, cross_panel: false }
+        PlacedItem {
+            code: code.into(),
+            name: code.into(),
+            col,
+            row,
+            w,
+            h,
+            cross_panel: false,
+        }
     }
 
     #[test]
     fn accepts_valid_layout_and_reports_extent() {
-        let items = vec![item("a", 0, 0, 1, 1), item("b", 2, 0, 2, 1), item("c", 0, 1, 1, 3)];
+        let items = vec![
+            item("a", 0, 0, 1, 1),
+            item("b", 2, 0, 2, 1),
+            item("c", 0, 1, 1, 3),
+        ];
         let sizes = |c: &str| match c {
             "a" => Some((1, 1)),
             "b" => Some((2, 1)),
@@ -419,7 +457,11 @@ mod tests {
         let issues = validate_body_slots(&equipped);
         assert_eq!(issues.len(), 1);
         match &issues[0] {
-            Issue::DuplicateBodySlot { slot, first, second } => {
+            Issue::DuplicateBodySlot {
+                slot,
+                first,
+                second,
+            } => {
                 assert_eq!(slot, "Head");
                 assert_eq!(first, "帽子A");
                 assert_eq!(second, "帽子B");

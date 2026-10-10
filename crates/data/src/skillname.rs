@@ -20,7 +20,11 @@ impl<'a> SkillNamer<'a> {
         strings: &'a crate::strings::Strings,
         lang: impl Into<String>,
     ) -> Self {
-        Self { tables, strings, lang: lang.into() }
+        Self {
+            tables,
+            strings,
+            lang: lang.into(),
+        }
     }
 
     fn text(&self, key: &str) -> Option<String> {
@@ -33,7 +37,8 @@ impl<'a> SkillNamer<'a> {
     /// 按技能 ID 取名字（键 `skillname<ID>`）。
     pub fn name_by_id(&self, skill_id: u16) -> Option<String> {
         let key = format!("skillname{skill_id}");
-        self.text(&key).or_else(|| self.text(&format!("SkillName{skill_id}")))
+        self.text(&key)
+            .or_else(|| self.text(&format!("SkillName{skill_id}")))
     }
 
     /// 按 `Skills.txt` 行号取名字（该行的 `*Id` → 字符串键）。
@@ -50,7 +55,9 @@ impl<'a> SkillNamer<'a> {
     /// `Skills.txt` 的 `skill` 列存放职业归属（如 `Amazon`），`*Id` 是技能 ID。
     pub fn class_skills(&mut self, class: &str) -> Vec<(u16, usize, Option<String>)> {
         let rows: Vec<(usize, u16)> = {
-            let Some(t) = self.tables.get("Skills") else { return Vec::new() };
+            let Some(t) = self.tables.get("Skills") else {
+                return Vec::new();
+            };
             (0..t.len())
                 .filter_map(|r| {
                     let owner = t.cell_nonempty(r, "skill")?;

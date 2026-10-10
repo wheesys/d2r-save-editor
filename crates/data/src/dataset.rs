@@ -25,12 +25,22 @@ pub struct TableStore {
 impl TableStore {
     /// 指定表目录（例如 `<游戏>\d2rloader\data\compiler\3.2.0\data\global\excel`）。
     pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: Some(dir.into()), override_dir: None, memory: HashMap::new(), cache: HashMap::new() }
+        Self {
+            dir: Some(dir.into()),
+            override_dir: None,
+            memory: HashMap::new(),
+            cache: HashMap::new(),
+        }
     }
 
     /// 空集合（尚未绑定目录）。
     pub fn empty() -> Self {
-        Self { dir: None, override_dir: None, memory: HashMap::new(), cache: HashMap::new() }
+        Self {
+            dir: None,
+            override_dir: None,
+            memory: HashMap::new(),
+            cache: HashMap::new(),
+        }
     }
 
     /// 挂一个覆盖目录（一般是用户装 mod 后 loader 展开出来的表）：
@@ -82,7 +92,9 @@ impl TableStore {
             names.sort();
             return names;
         };
-        let Ok(rd) = std::fs::read_dir(dir) else { return Vec::new() };
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return Vec::new();
+        };
         names.extend(rd.filter_map(|e| e.ok()).filter_map(|e| {
             let p = e.path();
             if p.extension()?.to_str()?.eq_ignore_ascii_case("txt") {
@@ -120,7 +132,9 @@ fn load_from_dir(dir: &Path, lowercase_name: &str) -> Option<Table> {
     let rd = std::fs::read_dir(dir).ok()?;
     for entry in rd.flatten() {
         let path = entry.path();
-        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else { continue };
+        let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
         if file_name.eq_ignore_ascii_case(&wanted) {
             return Table::from_file(&path).ok();
         }
@@ -241,7 +255,9 @@ impl ModInfo {
     /// 扫描 `mods/*/modinfo.json`，返回 (mod 目录, 描述)。
     pub fn scan(game_root: impl AsRef<Path>) -> Vec<(PathBuf, ModInfo)> {
         let mods = game_root.as_ref().join("mods");
-        let Ok(rd) = std::fs::read_dir(&mods) else { return Vec::new() };
+        let Ok(rd) = std::fs::read_dir(&mods) else {
+            return Vec::new();
+        };
         let mut out = Vec::new();
         for entry in rd.flatten() {
             let dir = entry.path();

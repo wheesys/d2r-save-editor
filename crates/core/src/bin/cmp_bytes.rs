@@ -12,7 +12,12 @@ fn main() -> ExitCode {
     }
     let a = std::fs::read(&args[0]).expect("读原文件");
     let b = std::fs::read(&args[1]).expect("读新文件");
-    println!("原文件 {} 字节，新文件 {} 字节，差 {}", a.len(), b.len(), b.len() as i64 - a.len() as i64);
+    println!(
+        "原文件 {} 字节，新文件 {} 字节，差 {}",
+        a.len(),
+        b.len(),
+        b.len() as i64 - a.len() as i64
+    );
 
     let n = a.len().min(b.len());
     let first = (0..n).find(|&i| a[i] != b[i]);
@@ -26,11 +31,15 @@ fn main() -> ExitCode {
             for shift in [1i64, 2, -1, -2] {
                 let mut same = 0usize;
                 let mut checked = 0usize;
-                for k in i..n {
+                for (k, byte_a) in a.iter().enumerate().skip(i) {
                     let j = k as i64 + shift;
-                    if j < 0 || j as usize >= b.len() { break; }
+                    if j < 0 || j as usize >= b.len() {
+                        break;
+                    }
                     checked += 1;
-                    if a[k] == b[j as usize] { same += 1; }
+                    if *byte_a == b[j as usize] {
+                        same += 1;
+                    }
                 }
                 if checked > 0 {
                     println!("  若把新文件偏移 {shift:+} 对齐：{same}/{checked} 字节相同");
@@ -40,7 +49,11 @@ fn main() -> ExitCode {
             for (label, buf) in [("原", &a), ("新", &b)] {
                 let s = i.saturating_sub(16);
                 let e = (i + 48).min(buf.len());
-                let hex = buf[s..e].iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" ");
+                let hex = buf[s..e]
+                    .iter()
+                    .map(|x| format!("{x:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
                 println!("{label} [{s}..{e}]: {hex}");
             }
         }
@@ -60,7 +73,11 @@ fn main() -> ExitCode {
             .count();
         println!("\n最长公共前缀: {prefix} 字节");
         println!("最长公共后缀: {suffix} 字节");
-        let (longer, _shorter, label) = if b.len() > a.len() { (&b, &a, "新文件多出") } else { (&a, &b, "原文件多出") };
+        let (longer, _shorter, label) = if b.len() > a.len() {
+            (&b, &a, "新文件多出")
+        } else {
+            (&a, &b, "原文件多出")
+        };
         let ins_start = prefix;
         let ins_end = longer.len() - suffix;
         println!(
@@ -73,11 +90,19 @@ fn main() -> ExitCode {
         let ctx_end = (ins_end + 8).min(longer.len());
         println!(
             "  上下文 [{ctx_start}..{ctx_end}]: {}",
-            longer[ctx_start..ctx_end].iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" ")
+            longer[ctx_start..ctx_end]
+                .iter()
+                .map(|x| format!("{x:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ")
         );
         println!(
             "  插入内容: {}",
-            longer[ins_start..ins_end].iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" ")
+            longer[ins_start..ins_end]
+                .iter()
+                .map(|x| format!("{x:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ")
         );
     }
     ExitCode::SUCCESS

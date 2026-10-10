@@ -2,7 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
-use d2r_core::{Edit, EditSession, ItemDetail, ItemEdit, ItemStats, LayoutHints, LayoutSettings, SaveKind};
+use d2r_core::{
+    Edit, EditSession, ItemDetail, ItemEdit, ItemStats, LayoutHints, LayoutSettings, SaveKind,
+};
 use d2r_data::{ItemNamer, SkillNamer, Strings, TableStore};
 
 use crate::dto::{
@@ -61,7 +63,11 @@ pub fn find_strings_dir() -> Option<PathBuf> {
     }
     let mut dir = std::env::current_dir().ok()?;
     loop {
-        let cand = dir.join("samples").join("game-data").join("lng").join("strings");
+        let cand = dir
+            .join("samples")
+            .join("game-data")
+            .join("lng")
+            .join("strings");
         if cand.is_dir() {
             return Some(cand);
         }
@@ -176,7 +182,12 @@ impl Workspace {
                 None => session.file.header.version,
             },
             size: session.file.original.len(),
-            checksum: session.file.stash.as_ref().map(|_| 0).or(Some(session.file.header.checksum)),
+            checksum: session
+                .file
+                .stash
+                .as_ref()
+                .map(|_| 0)
+                .or(Some(session.file.header.checksum)),
             roundtrip_identical: session.file.check_roundtrip().identical,
         };
         self.session = Some(session);
@@ -194,11 +205,15 @@ impl Workspace {
     }
 
     fn session(&self) -> Result<&EditSession, AppError> {
-        self.session.as_ref().ok_or_else(|| AppError::new("state", "还没有打开存档"))
+        self.session
+            .as_ref()
+            .ok_or_else(|| AppError::new("state", "还没有打开存档"))
     }
 
     fn session_mut(&mut self) -> Result<&mut EditSession, AppError> {
-        self.session.as_mut().ok_or_else(|| AppError::new("state", "还没有打开存档"))
+        self.session
+            .as_mut()
+            .ok_or_else(|| AppError::new("state", "还没有打开存档"))
     }
 
     /// 角色信息。
@@ -279,7 +294,9 @@ impl Workspace {
 
     /// 需要用户确认的项（空数组表示没啥要问的）。
     pub fn layout_questions(&self) -> Result<Vec<String>, AppError> {
-        Ok(d2r_core::needs_confirmation(&self.session()?.layout_hints()))
+        Ok(d2r_core::needs_confirmation(
+            &self.session()?.layout_hints(),
+        ))
     }
 
     /// 物品明细（含中文名）。
@@ -324,7 +341,8 @@ impl Workspace {
     pub fn validate_bounds(&self) -> Result<Vec<d2r_core::BoundsIssue>, AppError> {
         let session = self.session()?;
         let size_map = crate::bundle::item_size_map();
-        let (issues, _checked) = session.validate_bounds(&self.layout, |code| size_map.get(code).copied());
+        let (issues, _checked) =
+            session.validate_bounds(&self.layout, |code| size_map.get(code).copied());
         Ok(issues)
     }
 
@@ -341,7 +359,10 @@ impl Workspace {
 
     /// 挂起的物品修改条数。
     pub fn pending_item_edits(&self) -> usize {
-        self.session.as_ref().map(|s| s.item_edits.len()).unwrap_or(0)
+        self.session
+            .as_ref()
+            .map(|s| s.item_edits.len())
+            .unwrap_or(0)
     }
 
     /// 应用修改（原子：任一条失败全部回滚）。
@@ -358,9 +379,17 @@ impl Workspace {
             Ok((bytes, ok)) => Ok(VerifyResult {
                 ok,
                 bytes: bytes.len(),
-                message: if ok { "写出并重新解析通过".into() } else { "往返不一致".into() },
+                message: if ok {
+                    "写出并重新解析通过".into()
+                } else {
+                    "往返不一致".into()
+                },
             }),
-            Err(e) => Ok(VerifyResult { ok: false, bytes: 0, message: e.to_string() }),
+            Err(e) => Ok(VerifyResult {
+                ok: false,
+                bytes: 0,
+                message: e.to_string(),
+            }),
         }
     }
 
@@ -369,13 +398,23 @@ impl Workspace {
         let session = self.session()?;
         let dest = match dest {
             Some(d) => d,
-            None => session.path.clone().ok_or_else(|| AppError::new("state", "没有源路径"))?,
+            None => session
+                .path
+                .clone()
+                .ok_or_else(|| AppError::new("state", "没有源路径"))?,
         };
         let backed_up = dest.exists();
         let edits = session.applied.len();
         let written = session.save_as(&dest)?;
-        let bytes = std::fs::metadata(&written).map(|m| m.len() as usize).unwrap_or(0);
-        Ok(SaveOutcome { path: written, bytes, backed_up, edits })
+        let bytes = std::fs::metadata(&written)
+            .map(|m| m.len() as usize)
+            .unwrap_or(0);
+        Ok(SaveOutcome {
+            path: written,
+            bytes,
+            backed_up,
+            edits,
+        })
     }
 
     /// 把保存结果转成 DTO。
@@ -396,12 +435,19 @@ impl Workspace {
 
     /// 已应用的修改明细（供界面展示/撤销提示）。
     pub fn applied_edits(&self) -> Vec<Edit> {
-        self.session.as_ref().map(|s| s.applied.clone()).unwrap_or_default()
+        self.session
+            .as_ref()
+            .map(|s| s.applied.clone())
+            .unwrap_or_default()
     }
 
     /// 重新加载（丢弃未保存修改）。
     pub fn reload(&mut self) -> Result<SaveInfo, AppError> {
-        let path = self.session()?.path.clone().ok_or_else(|| AppError::new("state", "没有源路径"))?;
+        let path = self
+            .session()?
+            .path
+            .clone()
+            .ok_or_else(|| AppError::new("state", "没有源路径"))?;
         self.open(path)
     }
 }

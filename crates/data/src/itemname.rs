@@ -48,7 +48,11 @@ pub struct ItemNamer<'a> {
 impl<'a> ItemNamer<'a> {
     /// 新建解析器。`lang` 为语言代码（如 `zhCN`/`enUS`）。
     pub fn new(strings: &'a Strings, tables: &'a mut TableStore, lang: impl Into<String>) -> Self {
-        Self { strings, tables, lang: lang.into() }
+        Self {
+            strings,
+            tables,
+            lang: lang.into(),
+        }
     }
 
     /// 查字符串（按当前语言，失败回退首选语言链）。
@@ -109,13 +113,7 @@ impl<'a> ItemNamer<'a> {
     ///
     /// `quality` 用调试字符串（如 `"Unique"`、`"Set"`、`"Magic"`），
     /// `file_index` 来自品质数据（暗金/套装/劣质的行号）。
-    pub fn resolve(
-        &mut self,
-        code: &str,
-        quality: &str,
-        file_index: Option<u16>,
-        
-    ) -> ItemName {
+    pub fn resolve(&mut self, code: &str, quality: &str, file_index: Option<u16>) -> ItemName {
         let mut quality_prefix = None;
         let mut note = None;
 
@@ -172,6 +170,11 @@ impl<'a> ItemNamer<'a> {
         }
 
         let resolved = base != code || quality_prefix.is_some();
-        ItemName { base, resolved, quality_prefix, note }
+        ItemName {
+            base,
+            resolved,
+            quality_prefix,
+            note,
+        }
     }
 }

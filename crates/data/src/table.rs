@@ -41,7 +41,13 @@ impl Table {
             .enumerate()
             .map(|(i, c)| (c.to_ascii_lowercase(), i))
             .collect();
-        Self { name: name.into(), source: source.into(), columns, rows, index }
+        Self {
+            name: name.into(),
+            source: source.into(),
+            columns,
+            rows,
+            index,
+        }
     }
 
     /// 从文件读取（按 UTF-8 解析，失败回退 GBK 常见兼容无法处理时给原始错误）。
@@ -49,7 +55,10 @@ impl Table {
         let path = path.as_ref();
         let bytes = std::fs::read(path)?;
         let text = decode_text(&bytes);
-        let name = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
         Ok(Self::parse_tsv(name, path, &text))
     }
 
@@ -80,18 +89,27 @@ impl Table {
         if raw.is_empty() {
             return Some(0);
         }
-        raw.parse::<i64>().ok().or_else(|| raw.parse::<f64>().ok().map(|f| f as i64))
+        raw.parse::<i64>()
+            .ok()
+            .or_else(|| raw.parse::<f64>().ok().map(|f| f as i64))
     }
 
     /// 某列的全部取值（保持行序）。
     pub fn column_values(&self, column: &str) -> Vec<&str> {
-        let Some(c) = self.column_index(column) else { return Vec::new() };
-        self.rows.iter().filter_map(|r| r.get(c).map(|s| s.as_str())).collect()
+        let Some(c) = self.column_index(column) else {
+            return Vec::new();
+        };
+        self.rows
+            .iter()
+            .filter_map(|r| r.get(c).map(|s| s.as_str()))
+            .collect()
     }
 
     /// 按行号取某列（空串返回 None，便于"取有效值"）。
     pub fn cell_nonempty(&self, row: usize, column: &str) -> Option<&str> {
-        self.cell(row, column).map(|s| s.trim()).filter(|s| !s.is_empty())
+        self.cell(row, column)
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
     }
 
     /// 取某列的整数（空串按 0）。
@@ -104,7 +122,9 @@ impl Table {
         let c = self.column_index(column)?;
         let needle = value.trim().to_ascii_lowercase();
         self.rows.iter().position(|r| {
-            r.get(c).map(|v| v.trim().to_ascii_lowercase() == needle).unwrap_or(false)
+            r.get(c)
+                .map(|v| v.trim().to_ascii_lowercase() == needle)
+                .unwrap_or(false)
         })
     }
 }

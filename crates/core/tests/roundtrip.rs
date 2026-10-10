@@ -35,7 +35,9 @@ fn samples_root() -> Option<PathBuf> {
 }
 
 fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut entries: Vec<_> = rd.filter_map(|e| e.ok()).map(|e| e.path()).collect();
     entries.sort();
     for e in entries {
@@ -48,7 +50,10 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn known_reason(name: &str) -> Option<&'static str> {
-    KNOWN_NON_IDENTICAL.iter().find(|(n, _)| *n == name).map(|(_, r)| *r)
+    KNOWN_NON_IDENTICAL
+        .iter()
+        .find(|(n, _)| *n == name)
+        .map(|(_, r)| *r)
 }
 
 #[test]
@@ -95,8 +100,16 @@ fn samples_roundtrip_is_byte_identical() {
         }
     }
 
-    println!("\n合计 {} 个样本：一致 {ok}，已知不通过 {known}，新增失败 {}", files.len(), failures.len());
-    assert!(failures.is_empty(), "出现新的往返不一致：\n  {}", failures.join("\n  "));
+    println!(
+        "\n合计 {} 个样本：一致 {ok}，已知不通过 {known}，新增失败 {}",
+        files.len(),
+        failures.len()
+    );
+    assert!(
+        failures.is_empty(),
+        "出现新的往返不一致：\n  {}",
+        failures.join("\n  ")
+    );
 }
 
 #[test]
@@ -105,7 +118,9 @@ fn header_size_field_matches_file_length() {
     let mut files = Vec::new();
     collect(&root, &mut files);
     for path in &files {
-        let Ok(bytes) = std::fs::read(path) else { continue };
+        let Ok(bytes) = std::fs::read(path) else {
+            continue;
+        };
         let h = d2r_core::SaveHeader::parse_checked(&bytes).expect("头应合法");
         let name = path.file_name().unwrap().to_string_lossy();
         if name.ends_with(".d2s") {
@@ -127,7 +142,11 @@ fn header_size_field_matches_file_length() {
 #[test]
 fn user_modified_after_save_roundtrips() {
     let Some(root) = samples_root() else { return };
-    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
     let mut candidates: Vec<PathBuf> = Vec::new();
     for dir in [root.clone(), repo.join("samples").join("work")] {
         if let Ok(rd) = std::fs::read_dir(&dir) {

@@ -36,7 +36,9 @@ pub fn available() -> bool {
 fn unpack(compressed: &[u8], raw_len: usize) -> Option<Vec<u8>> {
     use std::io::Read;
     let mut out = Vec::with_capacity(raw_len);
-    flate2::read::ZlibDecoder::new(compressed).read_to_end(&mut out).ok()?;
+    flate2::read::ZlibDecoder::new(compressed)
+        .read_to_end(&mut out)
+        .ok()?;
     Some(out)
 }
 
@@ -115,10 +117,14 @@ pub fn load_strings() -> d2r_data::Strings {
 pub fn item_size_map() -> std::collections::BTreeMap<String, (u32, u32)> {
     let mut map = std::collections::BTreeMap::new();
     for table in ["Armor", "Weapons", "Misc"] {
-        let Some(text) = excel_table(table) else { continue };
+        let Some(text) = excel_table(table) else {
+            continue;
+        };
         let t = d2r_data::Table::parse_tsv(table, format!("<bundle>/{table}.txt"), &text);
         for row in 0..t.len() {
-            let Some(code) = t.cell_nonempty(row, "code") else { continue };
+            let Some(code) = t.cell_nonempty(row, "code") else {
+                continue;
+            };
             let w = t.int(row, "invwidth").unwrap_or(1).max(1) as u32;
             let h = t.int(row, "invheight").unwrap_or(1).max(1) as u32;
             map.insert(code.to_string(), (w, h));
@@ -163,11 +169,20 @@ mod tests {
         let mut store = d2r_data::TableStore::empty();
         let loaded = load_tables_into(&mut store);
         assert!(loaded > 80, "装进 TableStore 的表数量偏少：{loaded}");
-        assert!(store.get("Inventory").is_some(), "应从数据包装到 Inventory 表");
-        eprintln!("已从数据包装载 {loaded} 张表；字符串 {} 条", load_strings().len());
+        assert!(
+            store.get("Inventory").is_some(),
+            "应从数据包装到 Inventory 表"
+        );
+        eprintln!(
+            "已从数据包装载 {loaded} 张表；字符串 {} 条",
+            load_strings().len()
+        );
         assert!(!item_size_map().is_empty(), "物品尺寸表不应为空");
         let tables = excel_tables();
-        assert!(tables.contains(&"inventory".to_string()), "应包含 inventory 表");
+        assert!(
+            tables.contains(&"inventory".to_string()),
+            "应包含 inventory 表"
+        );
         assert!(tables.contains(&"itemstatcost".to_string()));
         assert!(tables.len() > 80, "表数量偏少：{}", tables.len());
 

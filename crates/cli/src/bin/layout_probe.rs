@@ -66,7 +66,15 @@ fn main() -> ExitCode {
             x += dx;
             // y += dy;
         }
-        rows.push((page.clone(), code.clone(), format!("{:?}", it.quality), x, y, w, h));
+        rows.push((
+            page.clone(),
+            code.clone(),
+            format!("{:?}", it.quality),
+            x,
+            y,
+            w,
+            h,
+        ));
         for ddy in 0..h {
             for ddx in 0..w {
                 let key = (x + ddx, y + ddy);
@@ -107,7 +115,11 @@ fn main() -> ExitCode {
         seen
     };
     let label = |code: &str| -> char {
-        order.iter().position(|c| c == code).map(|i| (b'A' + (i % 26) as u8) as char).unwrap_or('?')
+        order
+            .iter()
+            .position(|c| c == code)
+            .map(|i| (b'A' + (i % 26) as u8) as char)
+            .unwrap_or('?')
     };
     for y in 0..max_y {
         let mut line = format!("  {y:>2} ");
@@ -119,7 +131,15 @@ fn main() -> ExitCode {
         }
         println!("{line}");
     }
-    println!("\n图例: {}", order.iter().enumerate().map(|(i, c)| format!("{}={c}", (b'A' + (i % 26) as u8) as char)).collect::<Vec<_>>().join(" "));
+    println!(
+        "\n图例: {}",
+        order
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{}={c}", (b'A' + (i % 26) as u8) as char))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
 
     ExitCode::SUCCESS
 }

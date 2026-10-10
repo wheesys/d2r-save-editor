@@ -191,7 +191,10 @@ pub struct AppError {
 impl AppError {
     /// 构造。
     pub fn new(kind: impl Into<String>, message: impl Into<String>) -> Self {
-        Self { kind: kind.into(), message: message.into() }
+        Self {
+            kind: kind.into(),
+            message: message.into(),
+        }
     }
 }
 

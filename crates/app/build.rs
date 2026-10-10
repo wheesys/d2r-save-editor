@@ -31,8 +31,11 @@ fn main() {
     println!("cargo:rerun-if-changed=data-bundle/strings");
 
     let profile = std::env::var("PROFILE").unwrap_or_default();
+    // CI 上允许"无数据构建"：公共仓库不能带数据，CI 只为验证可编译并产出可启动的 exe。
+    // 本机打包（tools/package.ps1）不设这个变量，所以仍然强制要求数据包。
+    let allow_no_bundle = std::env::var("D2R_ALLOW_NO_BUNDLE").is_ok();
     if !has_bundle {
-        if profile == "release" {
+        if profile == "release" && !allow_no_bundle {
             eprintln!(
                 "error: release 构建缺少数据包 {}。\n\
                  请先运行：python tools/make-bundle.py\n\
@@ -41,7 +44,11 @@ fn main() {
             );
             std::process::exit(1);
         }
-        println!("cargo:warning=未找到数据包（{bundle:?}）：debug 构建继续，但运行时没有数据表与文本表。需要时运行 python tools/make-bundle.py");
+        if allow_no_bundle {
+            println!("cargo:warning=D2R_ALLOW_NO_BUNDLE 已设置：按无数据方式构建（exe 可启动但缺少数据表与文本表）");
+        } else {
+            println!("cargo:warning=未找到数据包（{bundle:?}）：debug 构建继续，但运行时没有数据表与文本表。需要时运行 python tools/make-bundle.py");
+        }
         write_empty(&out_dir);
         return;
     }
@@ -51,8 +58,14 @@ fn main() {
     let mut comp_total = 0usize;
     for group in ["excel", "strings"] {
         let dir = bundle.join(group);
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
-        let mut files: Vec<PathBuf> = rd.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut files: Vec<PathBuf> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_file())
+            .collect();
         files.sort();
         for path in files {
             let rel = format!("{group}/{}", path.file_name().unwrap().to_string_lossy());
@@ -94,12 +107,16 @@ fn write_empty(out_dir: &Path) {
 fn write_source(out_dir: &Path, entries: &[(String, PathBuf, usize)], has_bundle: bool) {
     let mut src = String::new();
     src.push_str("// 由 build.rs 生成：预压缩的数据包（运行时用 flate2 解压）。\n");
-    src.push_str(&format!("/// 数据包是否可用。\npub const AVAILABLE: bool = {has_bundle};\n"));
+    src.push_str(&format!(
+        "/// 数据包是否可用。\npub const AVAILABLE: bool = {has_bundle};\n"
+    ));
     src.push_str("/// (相对路径, 压缩数据, 解压后长度)\n");
     src.push_str("pub static FILES: &[(&str, &[u8], usize)] = &[\n");
     for (rel, path, raw_len) in entries {
         let lit = path.to_string_lossy().replace('\\', "/");
-        src.push_str(&format!("    ({rel:?}, include_bytes!({lit:?}), {raw_len}),\n"));
+        src.push_str(&format!(
+            "    ({rel:?}, include_bytes!({lit:?}), {raw_len}),\n"
+        ));
     }
     src.push_str("];\n");
     std::fs::write(out_dir.join("bundle_data.rs"), src).expect("写生成源码");
