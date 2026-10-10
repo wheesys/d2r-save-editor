@@ -1,6 +1,12 @@
-# 样本文件（存档、数据表、游戏导出）不入库；只保留说明文档
+# 样本文件（存档、数据表、游戏导出）不入库；只保留说明文档与元数据清单
+#
+# 原因：游戏数据是暴雪版权内容，存档是个人数据 —— 都不适合进公开仓库。
+# 数据留在本机，用 tools/fetch-data.ps1 从游戏目录重新导出，
+# 用 samples/manifest.json 的 sha256 校验一致性。
 samples/*
 !samples/README.md
+!samples/DATA-MANIFEST.md
+!samples/manifest.json
 
 # Rust 构建产物
 target/

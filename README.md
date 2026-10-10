@@ -14,10 +14,24 @@ crates/
 └── cli/    d2r        命令行工具
 desktop/  Tauri v2 桌面端（src-tauri = Rust 后端，dist = 前端构建产物）
 web/      前端源码（Vite + TypeScript，无框架）
-samples/  本地样本（存档、旁车文件、导出的游戏数据；已 gitignore）
+tools/    数据导出与清单工具（fetch-data.ps1、make-manifest.py）
+samples/  本地样本与数据清单（数据不入库，只入清单；见 samples/README.md）
 .tools/   开发辅助脚本（CASC 提取器源码、UI 驱动脚本等）
 docs/     调研与资料清单
 ```
+
+## 数据从哪来（不进 git，但可复现）
+
+游戏数据（官方 excel 表、字符串表）是暴雪版权内容，存档是个人数据——**都不入 git**。
+仓库里只保留元数据清单（`samples/DATA-MANIFEST.md`、`samples/manifest.json`，含逐文件 sha256）。
+
+```powershell
+# 在一台装有游戏 + CascView 的机器上重建数据
+pwsh -File tools/fetch-data.ps1            # 自动定位游戏目录，导出 excel 与字符串表
+python tools/make-manifest.py --check      # 用清单校验（418 个文件 / 35.53 MB）
+```
+
+详见 [samples/README.md](samples/README.md)。
 
 ## 开发
 
@@ -98,7 +112,8 @@ d2r edit 角色.d2s --set '[{"kind":"setLevel","level":90},
 
 - [调研文档](docs/research.md)
 - [继续开发所需资料清单](docs/next-steps-materials.md)
-- [样本目录说明](samples/README.md)
+- [样本目录说明与数据清单](samples/README.md)
+- [逐文件 sha256 清单](samples/DATA-MANIFEST.md)
 
 ## 许可证
 
