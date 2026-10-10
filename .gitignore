@@ -1,14 +1,9 @@
-# 样本文件（存档、数据表、游戏导出）不入库；只保留说明文档与元数据清单
-#
-# 原因：游戏数据是暴雪版权内容，存档是个人数据 —— 都不适合进公开仓库。
-# 数据留在本机，用 tools/fetch-data.ps1 从游戏目录重新导出，
-# 用 samples/manifest.json 的 sha256 校验一致性。
+# 本地样本与数据一律不入库；只保留说明文档。
+# 数据在本机生成（tools/ 下的脚本负责），仓库与本文件都不记录其来源与清单。
 samples/*
 !samples/README.md
-!samples/DATA-MANIFEST.md
-!samples/manifest.json
 
-# 随程序分发的游戏数据包（暴雪版权数据，不入库；由 tools/make-bundle.py 生成）
+# 构建时内嵌进程序的数据包（不入库；由 tools/make-bundle.py 在本机生成）
 crates/app/data-bundle/
 
 # Rust 构建产物

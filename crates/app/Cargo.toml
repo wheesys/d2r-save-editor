@@ -9,7 +9,7 @@ authors.workspace = true
 
 [features]
 default = ["bundled-data"]
-# 关闭后不内嵌数据包（体积更小，但要求用户机器上能找到游戏数据）
+# 关闭后不内嵌数据包（体积更小，但要求运行环境里存在本地数据）
 bundled-data = []
 
 [dependencies]

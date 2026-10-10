@@ -76,7 +76,7 @@ impl SaveHeader {
     }
 }
 
-/// 已知存档版本（`.d2s`），社区逆向结果；官方从未公开。
+/// 已知存档版本（`.d2s`），来自社区逆向结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveVersion {
     /// 暗黑2 毁灭之王 1.10+（32 位物品代码）。

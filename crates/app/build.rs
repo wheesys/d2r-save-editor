@@ -1,13 +1,13 @@
 //! 构建脚本：检查随程序分发的数据包是否就位，并生成内嵌所需的信息。
 //!
-//! 数据包（`crates/app/data-bundle/`）**不入 git**（暴雪版权数据），
+//! 数据包（`crates/app/data-bundle/`）**不入 git**，
 //! 由 `tools/make-bundle.py` 在打包前生成。
 //!
 //! 策略：
 //! - **debug 构建**：数据包缺失只警告 —— 刚 clone 的机器也能直接 `cargo build`，
 //!   只是运行时会提示"数据来源：无"；
 //! - **release 构建**：数据包缺失直接让构建失败 —— 防止发出一个"用户机器上
-//!   没有游戏数据就什么都干不了"的安装包。
+//!   没有本地数据就什么都干不了"的安装包。
 
 use std::path::{Path, PathBuf};
 
@@ -40,7 +40,7 @@ fn main() {
     } else {
         println!("cargo:rustc-env=D2R_BUNDLE_FILES=0");
         println!(
-            "cargo:warning=未找到数据包（{bundle:?}）：debug 构建继续，但运行时没有官方数据表与字符串表。\
+            "cargo:warning=未找到数据包（{bundle:?}）：debug 构建继续，但运行时没有数据表与字符串表。\
              需要时运行 python tools/make-bundle.py"
         );
     }

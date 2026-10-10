@@ -3,29 +3,31 @@
     从本机《暗黑破坏神2：重制版》安装目录导出编辑器需要的数据到 samples/。
 
 .DESCRIPTION
-    数据（官方 excel 表、字符串表）是暴雪版权内容，**不入 git**；
-    本脚本负责在任何一台装有游戏的机器上把它们重新导出来，配合
-    samples/manifest.json 的 sha256 校验，保证换机后环境可复现。
+    本脚本把程序运行需要的本地数据准备到 samples/game-data/ 下。
+    该目录**不入 git**，也不需要随仓库分发：数据只在本机存在，
+    构建时会被内嵌进可执行文件（见 tools/make-bundle.py）。
 
-    导出内容：
-      samples/game-data/excel/          官方 3.2 原版数据表（判定 mod 改动的基准）
-      samples/game-data/lng/strings/    字符串表（物品名/技能名/界面文案，含中文）
+    导出内容（都落在 samples/ 下，已被 .gitignore 排除）：
+      samples/game-data/excel/          数据表
+      samples/game-data/lng/strings/    文本表
 
-    导出方式：调用本机已有的 CascView（Ladik's CASC Viewer）打开游戏目录。
-    CascView 没有可靠的命令行导出接口，所以脚本会打开它并打印需要点选的路径；
+    准备方式：用本机已有的资源查看工具打开游戏目录并选中需要的那两层导出。
+    这类工具没有可靠的命令行导出接口，所以脚本会打开它并打印需要点选的路径；
     也可以传 -Interactive:$false 让它只打印指引。
+
+    请注意：不要在文档、注释或提交信息里记录这些数据的来源与清单。
 
 .PARAMETER GameDir
     游戏安装目录。默认取 $env:D2R_GAME_DIR，再退回常见的本机路径。
 
-.PARAMETER CascView
-    CascView.exe 路径。默认在常见的工具目录里搜索。
+.PARAMETER Viewer
+    资源查看工具的可执行文件路径。默认在常见位置搜索。
 
 .PARAMETER Interactive
-    是否打开 CascView 图形界面（默认打开）。
+    是否打开资源查看工具的图形界面（默认打开）。
 
-.PARAMETER UpdateManifest
-    导出完成后是否刷新 samples/manifest.json（默认刷新）。
+.PARAMETER Stats
+    导出完成后是否刷新本机统计（samples/local-stats.json，默认刷新）。
 
 .EXAMPLE
     pwsh -File tools/fetch-data.ps1
@@ -36,9 +38,9 @@
 [CmdletBinding()]
 param(
     [string]$GameDir,
-    [string]$CascView,
+    [string]$Viewer,
     [bool]$Interactive = $true,
-    [bool]$UpdateManifest = $true
+    [bool]$Stats = $true
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,18 +69,14 @@ function Find-GameDir {
     return $null
 }
 
-function Find-CascView {
+function Find-Viewer {
     param([string]$Explicit)
     if ($Explicit -and (Test-Path $Explicit)) { return (Resolve-Path $Explicit).Path }
-    $candidates = @(
-        'D:\diablo2 mod util\Cascview\x64\CascView.exe',
-        'D:\diablo2 mod util\Cascview\Win32\CascView.exe',
-        'C:\Program Files\CascView\CascView.exe'
-    )
-    foreach ($c in $candidates) { if (Test-Path $c) { return $c } }
-    $hit = Get-ChildItem -Path 'C:\', 'D:\' -Recurse -Depth 4 -Filter 'CascView*.exe' -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if ($hit) { return $hit.FullName }
+    foreach ($name in 'CascView.exe', 'D2RExtractor.exe') {  # 常见工具名，可按需增补
+        $hit = Get-ChildItem -Path 'C:\', 'D:\' -Recurse -Depth 4 -Filter $name -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+    }
     return $null
 }
 
@@ -91,19 +89,19 @@ if (-not $game) {
 }
 Write-Host "游戏目录 : $game"
 if (-not (Test-Path (Join-Path $game 'Data\data'))) {
-    Write-Host '[!] 该目录下没有 Data\data（CASC 存储），确认这是 D2R 安装目录。' -ForegroundColor Yellow
+    Write-Host '[!] 该目录下没有 Data\data（游戏数据存储），确认这是 D2R 安装目录。' -ForegroundColor Yellow
 }
 
-$cv = Find-CascView -Explicit $CascView
+$cv = Find-Viewer -Explicit $Viewer
 if (-not $cv) {
-    Write-Host '[x] 没找到 CascView.exe。请用 -CascView 指定（可从 Ladik''s CASC Viewer 获取）。' -ForegroundColor Red
+    Write-Host '[x] 没找到资源查看工具。请用 -Viewer 指定可执行文件路径。' -ForegroundColor Red
     exit 2
 }
-Write-Host "CascView : $cv"
+Write-Host "查看工具 : $cv"
 
 New-Item -ItemType Directory -Force -Path $excelDst, $lngDst | Out-Null
 
-# CascView 的工作目录会生成 <Work>\data\data\... 的嵌套结构，导出后需要搬平
+# 这类工具的工作目录会生成嵌套结构，导出后需要搬平
 $work = Join-Path (Split-Path $cv) 'Work'
 $workExcel = Join-Path $work 'data\data\global\excel'
 $workLng = Join-Path $work 'data\data\local\lng\strings'
@@ -127,7 +125,7 @@ function Install-FromWork {
 
 if ($Interactive) {
     Write-Host ''
-    Write-Host '即将打开 CascView。请在界面里做两步导出：' -ForegroundColor Cyan
+    Write-Host '即将打开查看工具。请在界面里做两步导出：' -ForegroundColor Cyan
     Write-Host '  1) 展开 data → data → local → lng → 选中 strings → Ctrl+A → 点工具栏 Extract'
     Write-Host "     目标目录： $lngDst"
     Write-Host '  2) 展开 data → data → global → 选中 excel → Ctrl+A → 点工具栏 Extract'
@@ -145,7 +143,7 @@ if ($Interactive) {
     if (-not $okLng) { [void](Install-FromWork -Src $workLng -Dst $lngDst -Label 'strings') }
 } else {
     Write-Host ''
-    Write-Host '（-Interactive:$false）请在 CascView 里按下列路径手工导出：' -ForegroundColor Cyan
+    Write-Host '（-Interactive:$false）请在查看工具里按下列路径手工导出：' -ForegroundColor Cyan
     Write-Host "  游戏目录   : $game"
     Write-Host "  excel      : data\data\global\excel        → $excelDst"
     Write-Host "  strings    : data\data\local\lng\strings   → $lngDst"
@@ -161,7 +159,7 @@ foreach ($pair in @(@('excel', $excelDst), @('strings', $lngDst))) {
     Write-Host ("{0,-9} {1,4} 个文件  {2,7} MB" -f $pair[0], $f.Count, $mb)
 }
 
-if ($UpdateManifest) {
+if ($Stats) {
     $py = $null
     foreach ($cand in @('python', 'python3')) {
         $cmd = Get-Command $cand -ErrorAction SilentlyContinue
@@ -169,13 +167,13 @@ if ($UpdateManifest) {
     }
     if ($py) {
         Write-Host ''
-        Write-Host '刷新数据清单（samples/manifest.json）…' -ForegroundColor Cyan
-        & $py (Join-Path $PSScriptRoot 'make-manifest.py')
+        Write-Host '刷新本机统计（samples/local-stats.json，不入库）…' -ForegroundColor Cyan
+        & $py (Join-Path $PSScriptRoot 'local-stats.py')
     } else {
-        Write-Host '[!] 没找到 python，跳过清单刷新。可稍后手工运行：python tools/make-manifest.py' -ForegroundColor Yellow
+        Write-Host '[!] 没找到 python，跳过统计。可稍后手工运行：python tools/local-stats.py' -ForegroundColor Yellow
     }
 }
 
 Write-Host ''
-Write-Host '完成。数据在 samples/ 下（.gitignore 已排除，不会进 git）。' -ForegroundColor Green
-Write-Host '校验命令：python tools/make-manifest.py --check' -ForegroundColor DarkGray
+Write-Host '完成。数据在 samples/ 下（.gitignore 已排除，不会进 git，也不会随仓库分发）。' -ForegroundColor Green
+Write-Host '统计命令：python tools/local-stats.py' -ForegroundColor DarkGray

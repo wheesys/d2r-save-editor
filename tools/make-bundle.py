@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
-"""把编辑器真正需要的游戏数据整理成一个可随程序分发的数据包。
+"""把程序运行需要的本地数据整理成一个可内嵌进可执行文件的数据包。
 
 产物：`crates/app/data-bundle/`
 
     crates/app/data-bundle/
-    ├── excel/            官方 3.2 原版数据表（只有顶层 *.txt，不含 .bin / base\\）
-    ├── strings/          字符串表（剔除语音等用不上的大文件）
-    └── BUNDLE.json       清单（来源、包含项、逐文件 sha256、总大小）
+    ├── excel/            数据表（只取程序会读的那一层）
+    ├── strings/          文本表（剔除程序用不到的大文件）
+    └── BUNDLE.json       清单（包含项、逐文件 sha256、总大小）
 
-为什么要筛选：CASC 导出的一整份是 35.53 MB，其中
-
-    excel\\*.bin        15.94 MB  编辑器不读（游戏运行时用的二进制表）
-    excel\\base\\       12.50 MB  loader 自己的基准层，不是原版表
-    strings\\vo.json     3.09 MB  语音元数据，界面用不到
-
-筛完约 14 MB，随安装包分发是合理的。
+为什么要筛选：本地导出的整份里只有一部分是程序真正会读的
+（二进制表、加载器自己的基准层、语音元数据都用不到），
+筛掉之后数据包体积小到可以随安装包分发。
 
 用法：
     python tools/make-bundle.py             # 生成数据包
@@ -34,9 +30,9 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 SRC = REPO / "samples" / "game-data"
 DST = REPO / "crates" / "app" / "data-bundle"
 
-# 字符串表里剔除的文件（体积大且编辑器用不到）
+# 文本表里剔除的文件（体积大且程序用不到）
 STRING_SKIP = {
-    "vo.json",  # 3.1 MB 语音元数据
+    "vo.json",  # 语音元数据
     "chinese-overlay.json",  # 中文覆盖层（改字体用）
 }
 
@@ -96,8 +92,7 @@ def build(quiet: bool = False) -> dict:
 
     manifest = {
         "schema": 1,
-        "note": "随程序分发的游戏数据包；由 tools/make-bundle.py 生成。"
-        "内容为暴雪版权数据（官方 3.2 原表与字符串表），仅用于本机存档编辑。",
+        "note": "随程序分发的本地数据包；由 tools/make-bundle.py 在本机生成。",
         "excel_files": sum(1 for f in files if f["path"].startswith("excel/")),
         "string_files": sum(1 for f in files if f["path"].startswith("strings/")),
         "total_bytes": sum(f["size"] for f in files),

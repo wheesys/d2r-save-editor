@@ -163,7 +163,7 @@ impl Dataset {
     /// 期望结构（D2RLoader 编译产物即满足）：
     /// ```text
     /// <root>/data/global/excel/          合并后的表
-    /// <root>/data/global/excel/base/     loader 自己的基准层（**不是官方原版表**，见文档 §3.7）
+    /// <root>/data/global/excel/base/     loader 自己的基准层（**不是原版表**，见文档 §3.7）
     /// <root>/data/local/lng/strings/     字符串表（可选，或用 with_strings_dir 追加）
     /// ```
     pub fn load(root: impl AsRef<Path>) -> Result<Self, DataError> {

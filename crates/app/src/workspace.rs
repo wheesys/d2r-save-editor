@@ -51,7 +51,7 @@ pub fn default_game_dir() -> PathBuf {
     PathBuf::from(r"D:\Games\d2r92777\Diablo II Resurrected Infernal Edition")
 }
 
-/// 在仓库/当前目录附近找官方字符串表（`samples/game-data/lng/strings`）。
+/// 在仓库/当前目录附近找本地文本表（`samples/game-data/lng/strings`）。
 pub fn find_strings_dir() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("D2R_STRINGS_DIR") {
         let p = PathBuf::from(p);
@@ -77,7 +77,7 @@ impl Workspace {
     /// **数据来源优先级**（目的是"用户机器上什么都不用找"）：
     ///
     /// 1. **随程序分发的数据包**（`crates/app/data-bundle`，构建期内嵌）——
-    ///    装了本程序就有数据，不需要游戏目录、不需要 CascView、不需要 D2RLoader；
+    ///    装了本程序就有数据，不需要游戏目录、不需要任何解包工具、不需要 mod 加载器；
     /// 2. 本机游戏目录里的 loader 编译产物 —— 只有用户自己装了 mod 才需要，
     ///    作为**补充**合并（mod 改了表时优先用游戏目录的版本）；
     /// 3. 开发期仓库里的 `samples/game-data`（CLI 开发者方便）。
@@ -133,7 +133,7 @@ impl Workspace {
         }
     }
 
-    /// 挂载官方字符串表目录（界面里可让用户选；合并进已有字符串）。
+    /// 挂载本地文本表目录（界面里可让用户选；合并进已有字符串）。
     pub fn set_strings_dir(&mut self, dir: impl AsRef<Path>) -> Result<usize, AppError> {
         let s = Strings::from_dir(dir).map_err(|e| AppError::new("strings", e.to_string()))?;
         let n = s.len();

@@ -10,7 +10,7 @@
 //! <游戏>\d2rloader\data\compiler\<游戏版本>\data\global\excel\base\  原版基准表
 //! ```
 //!
-//! 后续扩展：官方 CASC 导出的 `excel`（官方基准）、`local/lng/strings`（字符串表）、
+//! 后续扩展：本地导出的 `excel`（基准）、`local/lng/strings`（文本表）、
 //! mod 自带 txt、以及 D2R 的 json 表格式。
 
 pub mod dataset;

@@ -1,4 +1,4 @@
-//! 数据表目录比对：官方 CASC 导出 vs D2RLoader 展开产物（base 与 merged）。
+//! 数据表目录比对：本地导出结果 vs 加载器展开产物（base 与 merged）。
 //!
 //! ```text
 //! compare-dirs                                   # 用下面这些默认路径
@@ -6,8 +6,8 @@
 //! ```
 //!
 //! 用途（对应 `docs/next-steps-materials.md` §V3）：
-//! 1. 验证 loader 展开的原版表是否忠实于官方 CASC 原表；
-//! 2. 以官方原表为基准，确认 mod 改了哪些表。
+//! 1. 验证加载器展开的原版表是否忠实于本地导出的原表；
+//! 2. 以基准表为基准，确认 mod 改了哪些表。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use std::process::ExitCode;
 
 use d2r_data::Table;
 
-// 默认基准：随程序分发的数据包（也就是官方 CASC 的导出结果）
+// 默认基准：随程序分发的数据包（来自本地导出结果）
 const DEFAULT_OFFICIAL: &str = concat!(env!("CARGO_MANIFEST_DIR"), r"\..\app\data-bundle\excel");
 const DEFAULT_LOADER_BASE: &str = r"D:\Games\d2r92777\Diablo II Resurrected Infernal Edition\d2rloader\data\compiler\3.2.0\data\global\excel\base";
 const DEFAULT_LOADER_MERGED: &str = r"D:\Games\d2r92777\Diablo II Resurrected Infernal Edition\d2rloader\data\compiler\3.2.0\data\global\excel";
@@ -26,7 +26,7 @@ fn main() -> ExitCode {
     let loader = arg_value(&args, "--loader").unwrap_or_else(|| PathBuf::from(DEFAULT_LOADER_BASE));
     let merged = arg_value(&args, "--merged").unwrap_or_else(|| PathBuf::from(DEFAULT_LOADER_MERGED));
 
-    for (label, dir) in [("官方导出", &official), ("loader base", &loader), ("loader merged", &merged)] {
+    for (label, dir) in [("基准导出", &official), ("loader base", &loader), ("loader merged", &merged)] {
         if !dir.is_dir() {
             eprintln!("[{label}] 目录不存在：{}", dir.display());
             return ExitCode::from(2);
@@ -38,7 +38,7 @@ fn main() -> ExitCode {
     let loader_map = txt_files(&loader);
     let merged_map = txt_files(&merged);
 
-    println!("\n===== 1. 官方原表 vs loader base =====（验证 loader 展开是否忠实）");
+    println!("\n===== 1. 基准表 vs loader base =====（验证 loader 展开是否忠实）");
     let mut same = 0;
     let mut differ: Vec<(String, u64, u64)> = Vec::new();
     let mut only_official: Vec<String> = Vec::new();
@@ -65,15 +65,15 @@ fn main() -> ExitCode {
     println!("  逐字节一致 : {same} 张");
     println!("  内容不同   : {} 张", differ.len());
     for (n, a, b) in differ.iter().take(40) {
-        println!("      {n:<24} 官方 {a:>7} B / loader {b:>7} B");
+        println!("      {n:<24} 基准 {a:>7} B / loader {b:>7} B");
     }
     if differ.len() > 40 {
         println!("      ...（共 {} 张）", differ.len());
     }
-    println!("  仅官方有   : {} 张 {}", only_official.len(), summarize(&only_official));
+    println!("  仅基准有   : {} 张 {}", only_official.len(), summarize(&only_official));
     println!("  仅 loader  : {} 张 {}", only_loader.len(), summarize(&only_loader));
 
-    println!("\n===== 2. 官方原表 vs loader merged =====（= mod 实际改动范围）");
+    println!("\n===== 2. 基准表 vs loader merged =====（= mod 实际改动范围）");
     let mut mod_same = 0;
     let mut mod_changed: Vec<String> = Vec::new();
     for (name, path) in &official_map {
@@ -87,7 +87,7 @@ fn main() -> ExitCode {
                     mod_changed.push(name.clone());
                 }
             }
-            None => mod_changed.push(format!("{name}(仅官方)")),
+            None => mod_changed.push(format!("{name}(仅基准)")),
         }
     }
     println!("  未改动 : {mod_same} 张");
@@ -98,7 +98,7 @@ fn main() -> ExitCode {
 
     println!("\n===== 3. 关键表结构（行数×列数）=====");
     for name in ["inventory", "itemstatcost", "armor", "weapons", "misc", "itemtypes", "properties", "skills"] {
-        println!("  {name:<14} 官方 {:<16} base {:<16} merged {}",
+        println!("  {name:<14} 基准 {:<16} base {:<16} merged {}",
             describe(&official, name), describe(&loader, name), describe(&merged, name));
     }
 

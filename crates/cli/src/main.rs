@@ -379,8 +379,8 @@ fn cmd_dataset(args: &[String]) -> ExitCode {
     }
 
     // 与基准表逐表比对，列出 mod 改动的表（数据驱动适配的目标）
-    // 注意：这里的"基准"应指向**官方 CASC 导出**；loader 自带的 base\ 不是原版表
-    // （实测它与官方原表差 36 张），所以标签必须写清楚，避免误判 mod 改动范围。
+    // 注意：这里的"基准"应指向本地导出结果；loader 自带的 base\ 不是原版表
+    // （实测它与本地导出结果有差异），所以标签必须写清楚，避免误判 mod 改动范围。
     if let Some(base_dir) = ds.excel_base.as_ref().and_then(|b| b.dir()).map(Path::to_path_buf) {
         let mut changed = Vec::new();
         for name in &table_names {
@@ -392,7 +392,7 @@ fn cmd_dataset(args: &[String]) -> ExitCode {
                 changed.push(name.clone());
             }
         }
-        println!("loader base 层差异: {} 张（注意：这是 loader 自己的基准层，不是官方原版表）", changed.len());
+        println!("loader base 层差异: {} 张（注意：这是 loader 自己的基准层，不是原版表）", changed.len());
         if !changed.is_empty() {
             let show: Vec<_> = changed.iter().take(30).cloned().collect();
             println!("  {}", show.join(", "));
@@ -400,7 +400,7 @@ fn cmd_dataset(args: &[String]) -> ExitCode {
                 println!("  ...（共 {} 张）", changed.len());
             }
         }
-        println!("  提示：判定 mod 改动请在「官方 CASC 导出」上比，可用 `compare-dirs` 子命令");
+        println!("  提示：判定 mod 改动请在本地导出结果上比，可用 `compare-dirs` 子命令");
     }
 
     println!("字符串表  : {} 条", ds.string_count());
@@ -408,7 +408,7 @@ fn cmd_dataset(args: &[String]) -> ExitCode {
         println!("  语言    : {}", ds.strings.languages().join(", "));
     }
 
-    // 官方字符串表（CascView 导出的 json 目录）默认从 samples/game-data/lng/strings 加载
+    // 本地文本表默认从 samples/game-data/lng/strings 加载
     let strings_dir = args
         .iter()
         .position(|a| a == "--strings")
@@ -423,16 +423,16 @@ fn cmd_dataset(args: &[String]) -> ExitCode {
     if let Some(dir) = strings_dir {
         match ds.with_strings_dir(&dir) {
             Ok(n) => {
-                println!("官方字符串: {n} 条（{}）", dir.display());
+                println!("本地文本表: {n} 条（{}）", dir.display());
                 match (ds.text("rvl"), ds.text("amu")) {
                     (Some(a), Some(b)) => println!("  抽查 rvl={a}  amu={b}"),
                     _ => println!("  抽查失败：未查到 rvl/amu"),
                 }
             }
-            Err(e) => println!("官方字符串: 加载失败 {e}"),
+            Err(e) => println!("本地文本表: 加载失败 {e}"),
         }
     } else {
-        println!("官方字符串: 未找到目录（用 --strings <目录> 指定）");
+        println!("本地文本表: 未找到目录（用 --strings <目录> 指定）");
     }
     ExitCode::SUCCESS
 }

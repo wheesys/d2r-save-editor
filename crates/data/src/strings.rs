@@ -97,7 +97,7 @@ impl Strings {
 
     /// 解析一份字符串表 JSON。
     ///
-    /// 容错点（实测 D2R 官方导出的文件都带 UTF-8 BOM）：
+    /// 容错点（实测导出的文本表文件都带 UTF-8 BOM）：
     /// - 剥掉 UTF-8 BOM；
     /// - 顶层是数组，或 `{ "...": [...] }` 之类的包装对象；
     /// - 无法识别时返回空表（缺字符串表不应阻断整个装载流程，但调用方可用
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn strips_utf8_bom() {
-        // 官方导出（CascView）的 JSON 都带 UTF-8 BOM，必须能解析
+        // 导出的 JSON 都带 UTF-8 BOM，必须能解析
         let mut bytes = vec![0xEF, 0xBB, 0xBF];
         bytes.extend_from_slice(JSON);
         let s = Strings::from_json_bytes(&bytes);
