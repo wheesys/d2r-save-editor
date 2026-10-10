@@ -118,3 +118,37 @@ fn header_size_field_matches_file_length() {
         }
     }
 }
+
+/// "游戏真实写出 + 用户改动过"的存档也必须逐字节往返。
+///
+/// 样本来自用户提供的第一组"改动前后样本"（见 `docs/next-steps-materials.md` §3.11）：
+/// 改动后 = 游戏里移动过背包/箱子物品后保存的版本。这类样本最能代表真实使用场景，
+/// 所以单独作为回归项；样本不存在时跳过。
+#[test]
+fn user_modified_after_save_roundtrips() {
+    let Some(root) = samples_root() else { return };
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for dir in [root.clone(), repo.join("samples").join("work")] {
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if let Some(n) = p.file_name().and_then(|s| s.to_str()) {
+                    if n.contains("after") && (n.ends_with(".d2s") || n.ends_with(".d2i")) {
+                        candidates.push(p);
+                    }
+                }
+            }
+        }
+    }
+    if candidates.is_empty() {
+        eprintln!("跳过：没有 *after* 样本");
+        return;
+    }
+    for p in candidates {
+        let file = d2r_core::SaveFile::open(&p).expect("打开 after 样本");
+        let rt = file.check_roundtrip();
+        assert!(rt.identical, "{} 应逐字节往返一致：{rt}", p.display());
+        println!("[一致] {}", p.display());
+    }
+}

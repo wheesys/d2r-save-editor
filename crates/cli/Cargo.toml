@@ -16,3 +16,7 @@ d2r-core = { workspace = true }
 d2r-data = { workspace = true }
 d2r-app = { workspace = true }
 serde_json = { workspace = true }
+
+[[bin]]
+name = "layout-probe"
+path = "src/bin/layout_probe.rs"
