@@ -152,7 +152,8 @@ d2r edit 角色.d2s --set '[{"kind":"setLevel","level":90},
 
 ## 文档
 
-- [开发交接（断点续作）](docs/HANDOFF.md) ← **重启/接手后先看这份**
+- [待办清单](docs/TODO.md) ← **接着做什么看这份**
+- [开发交接（断点续作）](docs/HANDOFF.md) ← **环境、验证办法、已知坑**
 - [调研文档](docs/research.md)
 - [继续开发所需资料清单](docs/next-steps-materials.md)
 - [样本目录说明](samples/README.md)
