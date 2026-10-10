@@ -46,7 +46,7 @@ fn usage() {
          用法:\n  \
          d2r roundtrip [目录或文件...]      往返一致性校验（默认 samples/saves）\n  \
          d2r inspect   <文件.d2s|.d2i>      打印存档信息（--json 输出 JSON）\n  \
-         d2r validate  <文件.d2s>           容器与物品摆放校验（越界/重叠/未知物品）\n  \
+         d2r validate  <文件.d2s> [--layout <JSON>]  容器与摆放校验（越界/重叠/未知物品）\n  \
          d2r edit      <文件.d2s> --set <JSON> [--out <文件>]  编辑并保存（先校验后落盘）\n  \
          d2r view      <文件.d2s> [--json]                  角色/技能/传送点/物品总览（界面同源数据）\n  \
          d2r items     <文件.d2s> [--filter 关键字] [--json] 物品清单/明细\n  \
@@ -497,7 +497,7 @@ fn cmd_strings(args: &[String]) -> ExitCode {
 fn cmd_validate(args: &[String]) -> ExitCode {
     let lang = arg_of(args, "--lang").unwrap_or_else(|| "zhCN".to_string());
     let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
-        eprintln!("用法: d2r validate <文件.d2s> [--lang zhCN]");
+        eprintln!("用法: d2r validate <文件.d2s> [--lang zhCN] [--layout <JSON>]");
         return ExitCode::from(2);
     };
     let file = match SaveFile::open(Path::new(target)) {
@@ -534,6 +534,75 @@ fn cmd_validate(args: &[String]) -> ExitCode {
     }
     let class = format!("{:?}", file.save.character.class);
 
+    // 容器尺寸与佣兵全装备：存档里读不出来 → 先推断、再让用户确认（--layout 指定）
+    {
+        let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+        if let Err(e) = ws.open(target) {
+            eprintln!("打开失败：{e}");
+            return ExitCode::from(1);
+        }
+        if let Some(json) = arg_of(args, "--layout") {
+            match serde_json::from_str::<d2r_core::LayoutSettings>(&json) {
+                Ok(s) => {
+                    ws.set_layout(s);
+                    println!("布局      : 已按 --layout 指定");
+                }
+                Err(e) => {
+                    eprintln!("--layout 不是合法的布局 JSON：{e}");
+                    eprintln!("示例: --layout '{{\"inventoryCols\":10,\"inventoryRows\":8,\"stashCols\":16,\"stashRows\":16,\"mercFullEquipment\":true,\"confirmedByUser\":true}}'");
+                    return ExitCode::from(2);
+                }
+            }
+        }
+        match ws.layout_hints() {
+            Ok(h) => {
+                println!(
+                    "推断跨度  : 背包最大({},{})  箱子最大({})",
+                    h.inventory_max.map(|m| m.0).unwrap_or(0),
+                    h.inventory_max.map(|m| m.1).unwrap_or(0),
+                    match h.stash_max {
+                        Some((x, y)) => format!("{x},{y}"),
+                        None => "无数据".into(),
+                    }
+                );
+                if h.merc_section {
+                    println!("佣兵装备  : 段存在，{} 件物品", h.merc_items);
+                }
+                let layout = ws.layout().clone();
+                println!(
+                    "当前设置  : 背包 {}×{}｜箱子 {}×{}｜佣兵全装备 {}{}",
+                    layout.inventory_cols,
+                    layout.inventory_rows,
+                    layout.stash_cols,
+                    layout.stash_rows,
+                    if layout.merc_full_equipment { "是" } else { "否" },
+                    if layout.confirmed_by_user { "（用户确认）" } else { "（默认值，可用 --layout 指定）" }
+                );
+                // 用户已经确认过就不再重复问
+                if !layout.confirmed_by_user {
+                    let questions = d2r_core::needs_confirmation(&h);
+                    if !questions.is_empty() {
+                        println!("\n需要你确认的项（这些在存档里读不出来）：");
+                        for (i, q) in questions.iter().enumerate() {
+                            println!("  {}. {q}", i + 1);
+                        }
+                    }
+                }
+            }
+            Err(e) => println!("推断失败：{e}"),
+        }
+        match ws.validate_bounds() {
+            Ok(issues) if issues.is_empty() => println!("越界校验  : 通过（按当前布局设置）"),
+            Ok(issues) => {
+                println!("越界校验  : {} 件超出容器", issues.len());
+                for i in issues.iter().take(15) {
+                    println!("  ! {i}");
+                }
+            }
+            Err(e) => println!("越界校验  : 跳过（{e}）"),
+        }
+        println!();
+    }
     // 分区：按 (模式, 存储页) 分到不同网格
     let mut regions: std::collections::BTreeMap<String, Vec<d2r_data::PlacedItem>> =
         std::collections::BTreeMap::new();

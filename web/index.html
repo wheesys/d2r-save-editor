@@ -57,6 +57,28 @@
         <div id="waypoints" class="waypoints"></div>
       </section>
 
+      <section id="layout-section" class="card hidden">
+        <h2>容器布局设置</h2>
+        <p class="muted">
+          背包/箱子大小与「佣兵全装备」是 mod 改动，<strong>存档里读不出来</strong>。
+          下面是根据存档坐标推断的结果与需要你确认的项。
+        </p>
+        <div id="layout-questions" class="questions"></div>
+        <div class="grid">
+          <label>背包列数 <input id="l-inv-cols" type="number" min="1" max="64" /></label>
+          <label>背包行数 <input id="l-inv-rows" type="number" min="1" max="64" /></label>
+          <label>合成箱列数 <input id="l-cube-cols" type="number" min="1" max="64" /></label>
+          <label>合成箱行数 <input id="l-cube-rows" type="number" min="1" max="64" /></label>
+          <label>箱子列数 <input id="l-stash-cols" type="number" min="1" max="64" /></label>
+          <label>箱子行数 <input id="l-stash-rows" type="number" min="1" max="64" /></label>
+          <label class="inline"><input type="checkbox" id="l-merc" /> 佣兵全装备（mod）</label>
+        </div>
+        <div class="actions">
+          <button id="btn-apply-layout" class="primary">确认并应用布局</button>
+          <button id="btn-check-bounds">按此布局检查越界</button>
+        </div>
+        <div id="bounds-result" class="muted"></div>
+      </section>
       <section id="items-section" class="card hidden">
         <h2>物品</h2>
         <div id="items-summary" class="muted"></div>

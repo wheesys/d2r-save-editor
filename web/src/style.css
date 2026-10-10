@@ -127,3 +127,13 @@ tr:hover td { background: var(--panel-2); }
   font-size: 12px;
 }
 .cell-input:focus { border-color: var(--accent); outline: none; }
+/* 布局设置的"需要确认"提示 */
+.questions { display: grid; gap: 6px; margin-bottom: 10px; }
+.question {
+  border-left: 3px solid var(--accent);
+  background: var(--panel-2);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.ok { color: var(--ok); }

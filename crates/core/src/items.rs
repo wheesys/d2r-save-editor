@@ -109,6 +109,34 @@ pub enum ItemEdit {
     },
 }
 
+/// 一件物品超出用户确认的容器尺寸。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundsIssue {
+    /// 物品序号。
+    pub index: usize,
+    /// 物品代码。
+    pub code: String,
+    /// 容器名（背包/箱子/合成箱/腰带）。
+    pub page: String,
+    /// 物品所在格子。
+    pub at: (u32, u32),
+    /// 物品占格。
+    pub size: (u32, u32),
+    /// 用户确认的容器尺寸。
+    pub container: (u32, u32),
+}
+
+impl std::fmt::Display for BoundsIssue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}] {} 在{}的 ({},{}) 占 {}×{}，超出容器 {}×{}",
+            self.index, self.code, self.page, self.at.0, self.at.1, self.size.0, self.size.1, self.container.0, self.container.1
+        )
+    }
+}
+
 /// 物品统计（给界面/CLI 汇总）。
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -192,6 +220,116 @@ impl EditSession {
         }
     }
 
+    /// 按用户确认的布局做**可靠的越界校验**。
+    ///
+    /// 为什么现在能硬判：`layout` 是用户勾选/填写的实际尺寸（读不出来所以问用户），
+    /// 有了它之后"物品是否超出容器"就从"猜"变成"算"。
+    ///
+    /// 返回 `(问题列表, 参与校验的物品数)`。
+    pub fn validate_bounds(
+        &self,
+        layout: &crate::layout::LayoutSettings,
+        size_of: impl Fn(&str) -> Option<(u32, u32)>,
+    ) -> (Vec<BoundsIssue>, usize) {
+        let mut issues = Vec::new();
+        let mut checked = 0usize;
+
+        for (index, it) in self.file.save.items.iter().enumerate() {
+            let p = &it.position;
+            let mode = format!("{:?}", p.mode);
+            if !matches!(mode.as_str(), "Stored" | "InBelt") {
+                continue;
+            }
+            let (cols, rows, label) = match format!("{:?}", p.store_page).as_str() {
+                "Inventory" => (layout.inventory_cols, layout.inventory_rows, "背包"),
+                "Cube" => (layout.cube_cols, layout.cube_rows, "合成箱"),
+                "Stash" => (layout.stash_cols, layout.stash_rows, "箱子"),
+                "Belt" => (4, 4, "腰带"),
+                _ => continue,
+            };
+            let (w, h) = size_of(&it.code.to_string()).unwrap_or((1, 1));
+            let (x, y) = (p.inv_x as u32, p.inv_y as u32);
+            checked += 1;
+            if x + w > cols || y + h > rows {
+                issues.push(BoundsIssue {
+                    index,
+                    code: it.code.to_string(),
+                    page: label.to_string(),
+                    at: (x, y),
+                    size: (w, h),
+                    container: (cols, rows),
+                });
+            }
+        }
+        (issues, checked)
+    }
+
+    /// 从存档推断存储布局（读不出来的项会出现在 `unknowns`）。
+    ///
+    /// 只做**下限推断**：坐标跨度只能说明"至少这么大"，不能说明真实尺寸，
+    /// 所以推断结果用于提示用户确认，而不是直接当作真实尺寸使用。
+    pub fn layout_hints(&self) -> crate::layout::LayoutHints {
+        use crate::layout::LayoutHints;
+
+        let mut hints = LayoutHints::default();
+        let mut inv_max: Option<(u32, u32)> = None;
+        let mut cube_max: Option<(u32, u32)> = None;
+        let mut stash_max: Option<(u32, u32)> = None;
+
+        for it in &self.file.save.items {
+            let p = &it.position;
+            let mode = format!("{:?}", p.mode);
+            if !matches!(mode.as_str(), "Stored" | "InBelt") {
+                continue;
+            }
+            let (x, y) = (p.inv_x as u32, p.inv_y as u32);
+            match format!("{:?}", p.store_page).as_str() {
+                "Inventory" => {
+                    let cur = inv_max.get_or_insert((0, 0));
+                    cur.0 = cur.0.max(x);
+                    cur.1 = cur.1.max(y);
+                }
+                "Cube" => {
+                    let cur = cube_max.get_or_insert((0, 0));
+                    cur.0 = cur.0.max(x);
+                    cur.1 = cur.1.max(y);
+                }
+                "Stash" => {
+                    let cur = stash_max.get_or_insert((0, 0));
+                    cur.0 = cur.0.max(x);
+                    cur.1 = cur.1.max(y);
+                }
+                _ => {}
+            }
+        }
+
+        if let Some((x, y)) = inv_max {
+            hints.inventory_max = Some((x, y));
+            // 跨度只是下限：真实尺寸至少是"最大坐标 + 1"，再留一行余量
+            hints.inventory_extent = Some((x + 1, y + 1));
+        }
+        if let Some((x, y)) = cube_max {
+            hints.cube_max = Some((x, y));
+        }
+        if let Some((x, y)) = stash_max {
+            hints.stash_max = Some((x, y));
+            hints.stash_extent = Some((x + 1, y + 1));
+        }
+
+        // 佣兵装备段
+        if let Some(merc) = &self.file.save.merc_items {
+            hints.merc_section = true;
+            hints.merc_items = merc.items.len();
+        }
+
+        hints.unknowns = vec![
+            "背包真实格子数（存档只存坐标，不存容器尺寸）".into(),
+            "箱子真实格子数（同上）".into(),
+            "合成箱真实格子数（同上）".into(),
+            "是否佣兵全装备（mod 改动，存档无标记）".into(),
+        ];
+        hints
+    }
     /// 应用一条物品改动。
     pub fn apply_item(&mut self, edit: ItemEdit) -> Result<(), EditError> {
         // 先做所有校验，再改动（避免半途失败留下半成品）

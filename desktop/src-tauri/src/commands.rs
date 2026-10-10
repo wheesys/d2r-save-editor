@@ -106,6 +106,35 @@ pub fn apply_item_edits(state: State<'_, AppState>, edits: Vec<d2r_app::ItemEdit
 pub fn bundle_info(state: State<'_, AppState>) -> d2r_app::BundleInfo {
     state.0.lock().unwrap().bundle_info()
 }
+/// 当前布局设置（背包/箱子尺寸、佣兵全装备）。
+#[tauri::command]
+pub fn layout(state: State<'_, AppState>) -> d2r_core::LayoutSettings {
+    state.0.lock().unwrap().layout().clone()
+}
+
+/// 从存档推断布局（给出需要用户确认的项）。
+#[tauri::command]
+pub fn layout_hints(state: State<'_, AppState>) -> R<d2r_core::LayoutHints> {
+    state.0.lock().unwrap().layout_hints()
+}
+
+/// 需要用户确认的项（空数组 = 不用问）。
+#[tauri::command]
+pub fn layout_questions(state: State<'_, AppState>) -> R<Vec<String>> {
+    state.0.lock().unwrap().layout_questions()
+}
+
+/// 用户确认/修改布局设置。
+#[tauri::command]
+pub fn set_layout(state: State<'_, AppState>, layout: d2r_core::LayoutSettings) {
+    state.0.lock().unwrap().set_layout(layout);
+}
+
+/// 按当前布局做越界校验。
+#[tauri::command]
+pub fn validate_bounds(state: State<'_, AppState>) -> R<Vec<d2r_core::BoundsIssue>> {
+    state.0.lock().unwrap().validate_bounds()
+}
 /// 应用版本信息。
 #[tauri::command]
 pub fn versions() -> serde_json::Value {

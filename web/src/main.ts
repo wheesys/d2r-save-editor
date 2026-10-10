@@ -10,6 +10,9 @@ import {
   type ItemEdit,
   type ItemStats,
   type BundleInfo,
+  type LayoutSettings,
+  type LayoutHints,
+  type BoundsIssue,
   type SaveInfo,
   type SaveResult,
   type SkillDto,
@@ -207,6 +210,7 @@ async function loadAll() {
   renderWaypoints(await call<WaypointsDto[]>("waypoints"));
   items = await call<ItemDto[]>("item_details");
   renderItems(items);
+  await refreshLayout();
   setDirty(await call<boolean>("is_dirty"));
 }
 
@@ -224,6 +228,77 @@ async function applyEdits(edits: Edit[], label: string) {
   }
 }
 
+
+/** 读取并展示布局设置与"需要确认的项" */
+async function refreshLayout() {
+  try {
+    const [settings, hints, questions] = await Promise.all([
+      call<LayoutSettings>("layout"),
+      call<LayoutHints>("layout_hints"),
+      call<string[]>("layout_questions"),
+    ]);
+    ($("#l-inv-cols") as HTMLInputElement).value = String(settings.inventoryCols);
+    ($("#l-inv-rows") as HTMLInputElement).value = String(settings.inventoryRows);
+    ($("#l-cube-cols") as HTMLInputElement).value = String(settings.cubeCols);
+    ($("#l-cube-rows") as HTMLInputElement).value = String(settings.cubeRows);
+    ($("#l-stash-cols") as HTMLInputElement).value = String(settings.stashCols);
+    ($("#l-stash-rows") as HTMLInputElement).value = String(settings.stashRows);
+    ($("#l-merc") as HTMLInputElement).checked = settings.mercFullEquipment;
+
+    const hint =
+      `推断：背包最大 (${hints.inventoryMax?.[0] ?? "-"},${hints.inventoryMax?.[1] ?? "-"})｜` +
+      `合成箱最大 (${hints.cubeMax?.[0] ?? "-"},${hints.cubeMax?.[1] ?? "-"})｜` +
+      `箱子坐标最大 (${hints.stashMax?.[0] ?? "-"},${hints.stashMax?.[1] ?? "-"})｜` +
+      `佣兵段 ${hints.mercSection ? `${hints.mercItems} 件` : "无"}`;
+    const confirmNote = settings.confirmedByUser ? "（已由你确认）" : "（当前是默认值）";
+    $("#layout-questions").innerHTML =
+      `<div class="muted">${hint}${confirmNote}</div>` +
+      (questions.length === 0
+        ? ""
+        : questions.map((q) => `<div class="question">需要确认：${q}</div>`).join(""));
+    $("#layout-section").classList.remove("hidden");
+  } catch (e) {
+    showError(e, "读取布局设置失败");
+  }
+}
+
+async function applyLayout() {
+  const layout: LayoutSettings = {
+    inventoryCols: Number(($("#l-inv-cols") as HTMLInputElement).value),
+    inventoryRows: Number(($("#l-inv-rows") as HTMLInputElement).value),
+    cubeCols: Number(($("#l-cube-cols") as HTMLInputElement).value),
+    cubeRows: Number(($("#l-cube-rows") as HTMLInputElement).value),
+    stashCols: Number(($("#l-stash-cols") as HTMLInputElement).value),
+    stashRows: Number(($("#l-stash-rows") as HTMLInputElement).value),
+    mercFullEquipment: ($("#l-merc") as HTMLInputElement).checked,
+    confirmedByUser: true,
+  };
+  try {
+    await call<void>("set_layout", { layout });
+    toast("布局已确认。之后保存时按这套尺寸做越界校验。");
+    await refreshLayout();
+  } catch (e) {
+    showError(e, "应用布局失败");
+  }
+}
+
+async function checkBounds() {
+  try {
+    const issues = await call<BoundsIssue[]>("validate_bounds");
+    $("#bounds-result").innerHTML =
+      issues.length === 0
+        ? `<span class="ok">越界校验通过（按当前布局设置）</span>`
+        : issues
+            .map(
+              (i) =>
+                `<div class="question">[${i.index}] ${i.code} 在${i.page}的 (${i.at[0]},${i.at[1]}) 占 ${i.size[0]}×${i.size[1]}，超出容器 ${i.container[0]}×${i.container[1]}</div>`,
+            )
+            .join("");
+    toast(issues.length === 0 ? "越界校验通过" : `发现 ${issues.length} 件超出容器`, issues.length === 0 ? "ok" : "error");
+  } catch (e) {
+    showError(e, "越界校验失败");
+  }
+}
 function bind() {
   $("#btn-open").addEventListener("click", async () => {
     try {
@@ -292,6 +367,9 @@ function bind() {
       showError(e, "物品修改被拒绝");
     }
   });
+
+  $("#btn-apply-layout").addEventListener("click", applyLayout);
+  $("#btn-check-bounds").addEventListener("click", checkBounds);
 
   $("#btn-apply-char").addEventListener("click", async () => {
     const num = (sel: string) => Number(($(sel) as HTMLInputElement).value);

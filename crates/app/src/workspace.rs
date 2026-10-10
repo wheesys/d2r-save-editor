@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use d2r_core::{Edit, EditSession, ItemDetail, ItemEdit, ItemStats, SaveKind};
+use d2r_core::{Edit, EditSession, ItemDetail, ItemEdit, ItemStats, LayoutHints, LayoutSettings, SaveKind};
 use d2r_data::{ItemNamer, SkillNamer, Strings, TableStore};
 
 use crate::dto::{
@@ -37,6 +37,8 @@ pub struct Workspace {
     strings: Strings,
     /// 显示语言。
     pub lang: String,
+    /// 容器/佣兵布局设置（读不出来时由用户勾选）。
+    layout: LayoutSettings,
     /// 当前编辑会话。
     session: Option<EditSession>,
 }
@@ -126,6 +128,7 @@ impl Workspace {
             tables,
             strings,
             lang: "zhCN".to_string(),
+            layout: LayoutSettings::default(),
             session: None,
         }
     }
@@ -258,6 +261,27 @@ impl Workspace {
             .collect())
     }
 
+    /// 当前布局设置。
+    pub fn layout(&self) -> &LayoutSettings {
+        &self.layout
+    }
+
+    /// 用户确认/修改布局设置。
+    pub fn set_layout(&mut self, mut s: LayoutSettings) {
+        s.confirmed_by_user = true;
+        self.layout = s;
+    }
+
+    /// 从存档推断布局（读不出来的项列在 `unknowns` 里，交给界面提示用户）。
+    pub fn layout_hints(&self) -> Result<LayoutHints, AppError> {
+        Ok(self.session()?.layout_hints())
+    }
+
+    /// 需要用户确认的项（空数组表示没啥要问的）。
+    pub fn layout_questions(&self) -> Result<Vec<String>, AppError> {
+        Ok(d2r_core::needs_confirmation(&self.session()?.layout_hints()))
+    }
+
     /// 物品明细（含中文名）。
     pub fn item_details(&mut self) -> Result<Vec<ItemDto>, AppError> {
         let details: Vec<ItemDetail> = {
@@ -294,6 +318,14 @@ impl Workspace {
                 }
             })
             .collect())
+    }
+
+    /// 按当前布局设置做越界校验（尺寸来自内置数据包 + mod 覆盖）。
+    pub fn validate_bounds(&self) -> Result<Vec<d2r_core::BoundsIssue>, AppError> {
+        let session = self.session()?;
+        let size_map = crate::bundle::item_size_map();
+        let (issues, _checked) = session.validate_bounds(&self.layout, |code| size_map.get(code).copied());
+        Ok(issues)
     }
 
     /// 物品汇总统计。

@@ -55,7 +55,7 @@ cargo run -p d2r-cli -- inspect <存档> [--json]          # 头部/角色/物�
 cargo run -p d2r-cli -- view   <存档> [--json]           # 角色+技能+传送点+物品总览
 cargo run -p d2r-cli -- edit   <存档> --set '<JSON>'     # 编辑并保存（先校验后落盘）
 cargo run -p d2r-cli -- items  <存档> [--filter 关键字]  # 物品清单/明细（--json）
-cargo run -p d2r-cli -- validate <文件.d2s>              # 容器与摆放校验
+cargo run -p d2r-cli -- validate <文件.d2s> [--layout JSON]  # 容器与摆放校验（尺寸可确认）
 cargo run -p d2r-cli -- dataset                          # 数据集与字符串表
 cargo run -p d2r-cli -- strings [rvl amu]                # 字符串表抽查
 cargo run -p d2r-data --bin compare-dirs                 # 官方表 vs loader base vs merged

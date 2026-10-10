@@ -130,3 +130,34 @@ export const STAT = {
   GOLD: 14,
   STASH_GOLD: 15,
 } as const;
+
+export interface LayoutSettings {
+  inventoryCols: number;
+  inventoryRows: number;
+  cubeCols: number;
+  cubeRows: number;
+  stashCols: number;
+  stashRows: number;
+  mercFullEquipment: boolean;
+  confirmedByUser: boolean;
+}
+
+export interface LayoutHints {
+  inventoryExtent: [number, number] | null;
+  inventoryMax: [number, number] | null;
+  cubeMax: [number, number] | null;
+  stashExtent: [number, number] | null;
+  stashMax: [number, number] | null;
+  mercSection: boolean;
+  mercItems: number;
+  unknowns: string[];
+}
+
+export interface BoundsIssue {
+  index: number;
+  code: string;
+  page: string;
+  at: [number, number];
+  size: [number, number];
+  container: [number, number];
+}
