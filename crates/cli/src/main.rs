@@ -57,6 +57,26 @@ fn default_game_dir() -> PathBuf {
     PathBuf::from(r"D:\Games\d2r92777\Diablo II Resurrected Infernal Edition")
 }
 
+/// 取 `--key value` 形式的参数值。
+fn arg_of(args: &[String], key: &str) -> Option<String> {
+    let i = args.iter().position(|a| a == key)?;
+    args.get(i + 1).cloned()
+}
+
+/// 默认字符串表目录：仓库内 `samples/game-data/lng/strings`（从当前目录逐级向上找）。
+fn default_strings_dir() -> Option<PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        let cand = dir.join("samples").join("game-data").join("lng").join("strings");
+        if cand.is_dir() {
+            return Some(cand);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
 fn default_samples_dir() -> PathBuf {
     if let Ok(p) = std::env::var("D2R_SAMPLES_DIR") {
         return PathBuf::from(p);
@@ -137,8 +157,9 @@ fn cmd_roundtrip(args: &[String]) -> ExitCode {
 
 fn cmd_inspect(args: &[String]) -> ExitCode {
     let json = args.iter().any(|a| a == "--json");
+    let lang = arg_of(args, "--lang").unwrap_or_else(|| "zhCN".to_string());
     let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
-        eprintln!("用法: d2r inspect <文件.d2s|.d2i> [--json]");
+        eprintln!("用法: d2r inspect <文件.d2s|.d2i> [--json] [--lang zhCN] [--strings <目录>]");
         return ExitCode::from(2);
     };
     let path = Path::new(target);
@@ -150,15 +171,50 @@ fn cmd_inspect(args: &[String]) -> ExitCode {
         }
     };
 
+    // 名称解析：字符串表 + 暗金/套装表
+    let strings_dir = arg_of(args, "--strings")
+        .map(PathBuf::from)
+        .or_else(|| default_strings_dir());
+    let mut tables = d2r_data::TableStore::empty();
+    if let Some(game) = d2r_data::find_loader_dataset(default_game_dir()) {
+        tables = d2r_data::TableStore::new(game.join("data").join("global").join("excel"));
+    }
+    let strings = match &strings_dir {
+        Some(dir) => d2r_data::Strings::from_dir(dir).unwrap_or_default(),
+        None => d2r_data::Strings::default(),
+    };
+    let mut namer = d2r_data::ItemNamer::new(&strings, &mut tables, &lang);
+    let has_names = !strings.is_empty();
+
+    // 预先解析所有物品名（namer 需要可变借用表集合）
+    let names: Vec<Option<d2r_data::ItemName>> = if has_names {
+        file.save
+            .items
+            .iter()
+            .map(|it| {
+                let quality = format!("{:?}", it.quality);
+                let idx = it.quality_data.as_ref().and_then(|q| q.file_index());
+                Some(namer.resolve(&it.code.to_string(), &quality, idx))
+            })
+            .collect()
+    } else {
+        vec![None; file.save.items.len()]
+    };
+
     if json {
         let items: Vec<serde_json::Value> = file
             .save
             .items
             .iter()
-            .map(|it| {
+            .enumerate()
+            .map(|(i, it)| {
                 let p = &it.position;
+                let nm = names.get(i).and_then(|n| n.as_ref());
                 serde_json::json!({
                     "code": it.code.to_string(),
+                    "name": nm.map(|n| n.display()),
+                    "name_resolved": nm.map(|n| n.resolved),
+                    "name_note": nm.and_then(|n| n.note.clone()),
                     "quality": format!("{:?}", it.quality),
                     "level": it.level,
                     "mode": format!("{:?}", p.mode),
@@ -205,12 +261,25 @@ fn cmd_inspect(args: &[String]) -> ExitCode {
         println!("校验和    : 0x{:08X}", file.header.checksum);
         println!("角色      : {} Lv{} {:?}", file.save.name(), file.save.character.level, file.save.character.class);
         println!("物品数    : {}", file.save.items.len());
-        for (i, it) in file.save.items.iter().enumerate().take(20) {
+        for (i, it) in file.save.items.iter().enumerate().take(30) {
             let p = &it.position;
-            println!("  [{i:>2}] {:<5} {:?} Lv{:<3} 模式={:?} 装备位={:?} 格=({},{}) 页={:?} 属性={}",
-                it.code, it.quality, it.level, p.mode, p.body_location, p.inv_x, p.inv_y, p.store_page, it.stats.len());
+            let display = names
+                .get(i)
+                .and_then(|n| n.as_ref())
+                .map(|n| n.display())
+                .unwrap_or_else(|| it.code.to_string());
+            let note = names
+                .get(i)
+                .and_then(|n| n.as_ref())
+                .and_then(|n| n.note.clone())
+                .map(|s| format!("  ← {s}"))
+                .unwrap_or_default();
+            println!(
+                "  [{i:>2}] {:<5} {:<22} {:?} Lv{:<3} {:?} 格=({},{}) 页={:?} 属性={}{note}",
+                it.code.to_string(), display, it.quality, it.level, p.mode, p.inv_x, p.inv_y, p.store_page, it.stats.len()
+            );
         }
-        if file.save.items.len() > 20 {
+        if file.save.items.len() > 30 {
             println!("  ...（共 {} 件）", file.save.items.len());
         }
         let rt = file.check_roundtrip();

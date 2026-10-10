@@ -88,6 +88,25 @@ impl Table {
         let Some(c) = self.column_index(column) else { return Vec::new() };
         self.rows.iter().filter_map(|r| r.get(c).map(|s| s.as_str())).collect()
     }
+
+    /// 按行号取某列（空串返回 None，便于"取有效值"）。
+    pub fn cell_nonempty(&self, row: usize, column: &str) -> Option<&str> {
+        self.cell(row, column).map(|s| s.trim()).filter(|s| !s.is_empty())
+    }
+
+    /// 取某列的整数（空串按 0）。
+    pub fn int_at(&self, row: usize, column: &str) -> Option<i64> {
+        self.int(row, column)
+    }
+
+    /// 在整列里查找首个等于 `value` 的行号（大小写不敏感，两边都 trim）。
+    pub fn find_row_by(&self, column: &str, value: &str) -> Option<usize> {
+        let c = self.column_index(column)?;
+        let needle = value.trim().to_ascii_lowercase();
+        self.rows.iter().position(|r| {
+            r.get(c).map(|v| v.trim().to_ascii_lowercase() == needle).unwrap_or(false)
+        })
+    }
 }
 
 /// 文本解码：优先 UTF-8，带 BOM 时剥掉；失败则按 GBK 近似（仅用于容错）。

@@ -22,3 +22,7 @@ dist/
 *.swp
 .idea/
 .vscode/
+
+# 临时提交信息
+commit-msg.tmp
+*.tmp

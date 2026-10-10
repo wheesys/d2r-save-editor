@@ -14,10 +14,12 @@
 //! mod 自带 txt、以及 D2R 的 json 表格式。
 
 pub mod dataset;
+pub mod itemname;
 pub mod strings;
 pub mod table;
 
 pub use dataset::{Dataset, ModInfo, TableStore};
+pub use itemname::{ItemName, ItemNamer};
 pub use strings::Strings;
 pub use table::{DataError, Table};
 
