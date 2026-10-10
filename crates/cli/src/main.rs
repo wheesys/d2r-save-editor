@@ -24,6 +24,7 @@ fn main() -> ExitCode {
         "inspect" => cmd_inspect(&args[1..]),
         "dataset" => cmd_dataset(&args[1..]),
         "strings" => cmd_strings(&args[1..]),
+        "validate" => cmd_validate(&args[1..]),
         "-h" | "--help" | "help" => {
             usage();
             ExitCode::SUCCESS
@@ -42,7 +43,9 @@ fn usage() {
          用法:\n  \
          d2r roundtrip [目录或文件...]      往返一致性校验（默认 samples/saves）\n  \
          d2r inspect   <文件.d2s|.d2i>      打印存档信息（--json 输出 JSON）\n  \
-         d2r dataset   [--game <游戏目录>]  检查数据集\n\n\
+         d2r validate  <文件.d2s>           容器与物品摆放校验（越界/重叠/未知物品）\n  \
+         d2r dataset   [--game <游戏目录>]  检查数据集\n  \
+         d2r strings   [--dir <目录>]       字符串表抽查\n\n\
          环境变量:\n  \
          D2R_GAME_DIR      游戏目录（默认 D:\\Games\\d2r92777\\Diablo II Resurrected Infernal Edition）\n  \
          D2R_SAMPLES_DIR   样本目录（默认 <仓库>/samples/saves）",
@@ -451,6 +454,138 @@ fn cmd_strings(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn cmd_validate(args: &[String]) -> ExitCode {
+    let lang = arg_of(args, "--lang").unwrap_or_else(|| "zhCN".to_string());
+    let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!("用法: d2r validate <文件.d2s> [--lang zhCN]");
+        return ExitCode::from(2);
+    };
+    let file = match SaveFile::open(Path::new(target)) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("打开失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+    if file.kind != SaveKind::Character {
+        eprintln!("validate 目前只支持角色存档（.d2s）");
+        return ExitCode::from(2);
+    }
+
+    let Some(ds_root) = d2r_data::find_loader_dataset(default_game_dir()) else {
+        eprintln!("找不到 loader 数据集，无法取物品尺寸");
+        return ExitCode::from(1);
+    };
+    let excel = ds_root.join("data").join("global").join("excel");
+    let size_map = d2r_data::build_size_map(&excel);
+    let strings = match default_strings_dir() {
+        Some(dir) => d2r_data::Strings::from_dir(dir).unwrap_or_default(),
+        None => d2r_data::Strings::default(),
+    };
+    let mut tables = d2r_data::TableStore::new(excel.clone());
+    let class = format!("{:?}", file.save.character.class);
+
+    // 分区：按 (模式, 存储页) 分到不同网格
+    let mut regions: std::collections::BTreeMap<String, Vec<d2r_data::PlacedItem>> =
+        std::collections::BTreeMap::new();
+    let mut equipped: Vec<(String, String)> = Vec::new();
+    {
+        let mut namer = d2r_data::ItemNamer::new(&strings, &mut tables, &lang);
+        for it in &file.save.items {
+            let p = &it.position;
+            let mode = format!("{:?}", p.mode);
+            let page = format!("{:?}", p.store_page);
+            let code = it.code.to_string();
+            let quality = format!("{:?}", it.quality);
+            let idx = it.quality_data.as_ref().and_then(|q| q.file_index());
+            let name = namer.resolve(&code, &quality, idx).display();
+            let (w, h) = size_map.get(&code).copied().unwrap_or((1, 1));
+
+            match (mode.as_str(), page.as_str()) {
+                ("Equipped", _) => {
+                    equipped.push((format!("{:?}", p.body_location), name));
+                }
+                ("Stored" | "InBelt", "Inventory") => regions
+                    .entry("背包".to_string())
+                    .or_default()
+                    .push(d2r_data::PlacedItem { code, name, col: p.inv_x as u32, row: p.inv_y as u32, w, h, cross_panel: false }),
+                // 合成箱用局部坐标：实测偏移 (12,0) 后与背包物品零冲突
+                ("Stored" | "InBelt", "Cube") => regions
+                    .entry("背包".to_string())
+                    .or_default()
+                    .push(d2r_data::PlacedItem {
+                        code,
+                        name,
+                        col: p.inv_x as u32 + 12,
+                        row: p.inv_y as u32,
+                        w,
+                        h,
+                        cross_panel: true,
+                    }),
+                ("Stored" | "InBelt", "Belt") => regions
+                    .entry("腰带".to_string())
+                    .or_default()
+                    .push(d2r_data::PlacedItem { code, name, col: p.inv_x as u32, row: p.inv_y as u32, w, h, cross_panel: false }),
+                ("Stored", "Stash") => regions
+                    .entry(format!("储物箱 页{page}"))
+                    .or_default()
+                    .push(d2r_data::PlacedItem { code, name, col: p.inv_x as u32, row: p.inv_y as u32, w, h, cross_panel: false }),
+                _ => {}
+            }
+        }
+    }
+
+    println!("存档      : {target}");
+    println!("角色      : {} Lv{} {}", file.save.name(), file.save.character.level, class);
+    println!("物品总数  : {}", file.save.items.len());
+
+    // 原版背包尺寸（只作参照，不用于判越界：mod 会扩展存储且沿用 Inventory 页）
+    let vanilla = d2r_data::container_spec_from_tables(&mut tables, &class)
+        .map(|s| format!("{}×{}", s.cols, s.rows))
+        .unwrap_or_else(|| "未知".into());
+
+    let mut total = 0usize;
+    let mut warns = 0usize;
+    for (label, items) in &regions {
+        let strict = label != "背包"; // 背包区域混入 mod 扩展存储与合成箱局部坐标
+        let report = d2r_data::validate_region(label.clone(), items, |c| size_map.get(c).copied(), strict);
+        total += report.issues.iter().filter(|i| i.severity() == d2r_data::Severity::Error).count();
+        warns += report.issues.iter().filter(|i| i.severity() == d2r_data::Severity::Warning).count();
+        let status = if report.is_ok() { "通过" } else { "有冲突" };
+        println!(
+            "\n{label}: {} 件，坐标范围 {}×{}，占用 {} 格 → {status}",
+            report.checked, report.extent.0, report.extent.1, report.used_cells
+        );
+        if label == "背包" {
+            println!("    参照：原版 inventory.txt 里 {class} 是 {vanilla}；实际跨度更大说明 mod 扩展过存储（不做越界判定）");
+        }
+        if report.is_ok() {
+            for it in items.iter().take(5) {
+                println!("    {} @({},{}) {}×{}", it.name, it.col, it.row, it.w, it.h);
+            }
+            if items.len() > 5 {
+                println!("    ...（共 {} 件）", items.len());
+            }
+        } else {
+            for issue in report.issues.iter().take(20) {
+                println!("    ! {issue}");
+            }
+        }
+    }
+
+    let eq_issues = d2r_data::validate_body_slots(&equipped);
+    total += eq_issues.len();
+    println!("\n装备位    : {} 件已装备", equipped.len());
+    for issue in &eq_issues {
+        println!("    ! {issue}");
+    }
+    if eq_issues.is_empty() {
+        println!("    装备位无重复");
+    }
+
+    println!("\n合计确定问题: {total}，提示: {warns}");
+    if total == 0 { ExitCode::SUCCESS } else { ExitCode::from(1) }
+}
 fn find_ci(dir: &Path, stem: &str) -> Option<PathBuf> {    let wanted = format!("{stem}.txt");
     std::fs::read_dir(dir)
         .ok()?

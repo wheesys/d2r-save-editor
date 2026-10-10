@@ -15,11 +15,16 @@
 
 pub mod dataset;
 pub mod itemname;
+pub mod placement;
 pub mod strings;
 pub mod table;
 
 pub use dataset::{Dataset, ModInfo, TableStore};
 pub use itemname::{ItemName, ItemNamer};
+pub use placement::{
+    build_size_map, container_spec_from_tables, validate_body_slots, validate_region, ContainerSpec,
+    Issue, PlacedItem, RegionReport, Severity, ValidationReport,
+};
 pub use strings::Strings;
 pub use table::{DataError, Table};
 
