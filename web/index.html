@@ -94,6 +94,16 @@
         <div class="table-wrap"><table id="items"></table></div>
       </section>
 
+      <section id="inventory-section" class="card hidden">
+        <h2>容器视图</h2>
+        <p class="muted">
+          按容器网格渲染，物品块的大小就是它占的格子数。<strong>点物品块</strong>在下方编辑属性，
+          <strong>拖动物品块</strong>可以换格子或换容器（写盘前会做完整校验）。
+          容器尺寸来自上面「容器布局设置」，越界的物品会单独列出而不是隐藏。
+        </p>
+        <div id="inventory" class="inventory"></div>
+      </section>
+
       <section id="item-detail-section" class="card hidden">
         <h2>物品属性：<span id="detail-title">—</span></h2>
         <div id="detail-summary" class="muted"></div>

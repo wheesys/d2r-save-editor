@@ -5,12 +5,90 @@
 //! - **不写死游戏常量**：属性位宽/步长来自数据表，容器尺寸由用户确认（见 [`crate::layout`]）；
 //! - **失败安全**：越界、超上限、不存在的下标一律拒绝，不"猜着写"。
 
-use d2s::{ItemPosition, Stat, StatId};
+use d2s::{ItemMode, ItemPosition, Stat, StatId};
 
 use crate::edit::{EditError, EditSession};
 
 /// 存档里孔数字段是 3 位，所以一件物品最多 7 孔（游戏内核也是这个上限）。
 pub const MAX_SOCKETS: usize = 7;
+
+/// 储物页名（与 `d2s::StorePage` 的变体一一对应）。
+///
+/// 用枚举而不是裸字符串：界面/CLI 与存档之间的映射只在这一处，
+/// 拼错名字会被 `parse` 立刻拒绝，而不是静默落到 `Unknown`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum StorePageName {
+    /// 背包页。
+    Inventory,
+    /// 装备页（穿戴中的物品）。
+    Equip,
+    /// 交易页。
+    Trade,
+    /// 赫拉迪姆方块。
+    Cube,
+    /// 储物箱。
+    Stash,
+    /// 腰带。
+    Belt,
+    /// 无（未放置）。
+    Null,
+}
+
+impl StorePageName {
+    /// 对应的原始值。
+    pub fn raw(self) -> u8 {
+        match self {
+            StorePageName::Inventory => 0,
+            StorePageName::Equip => 1,
+            StorePageName::Trade => 2,
+            StorePageName::Cube => 3,
+            StorePageName::Stash => 4,
+            StorePageName::Belt => 5,
+            StorePageName::Null => 255,
+        }
+    }
+
+    /// 从原始值还原（未知值返回 `None`）。
+    pub fn from_raw(raw: u8) -> Option<Self> {
+        Some(match raw {
+            0 => StorePageName::Inventory,
+            1 => StorePageName::Equip,
+            2 => StorePageName::Trade,
+            3 => StorePageName::Cube,
+            4 => StorePageName::Stash,
+            5 => StorePageName::Belt,
+            255 => StorePageName::Null,
+            _ => return None,
+        })
+    }
+
+    /// 名称（存档里的调试名，与本枚举变体同名）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StorePageName::Inventory => "Inventory",
+            StorePageName::Equip => "Equip",
+            StorePageName::Trade => "Trade",
+            StorePageName::Cube => "Cube",
+            StorePageName::Stash => "Stash",
+            StorePageName::Belt => "Belt",
+            StorePageName::Null => "Null",
+        }
+    }
+
+    /// 解析名称（大小写不敏感）。
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "inventory" => StorePageName::Inventory,
+            "equip" => StorePageName::Equip,
+            "trade" => StorePageName::Trade,
+            "cube" => StorePageName::Cube,
+            "stash" => StorePageName::Stash,
+            "belt" => StorePageName::Belt,
+            "null" => StorePageName::Null,
+            _ => return None,
+        })
+    }
+}
 
 /// 物品明细（只读展示用）。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -95,6 +173,24 @@ pub enum ItemEdit {
         index: usize,
         /// 新孔数。
         count: usize,
+    },
+    /// 移动到另一个容器/格子（会同时处理存储页与放置模式）。
+    Relocate {
+        /// 物品序号。
+        index: usize,
+        /// 目标存储页。
+        page: StorePageName,
+        /// 目标列。
+        col: u8,
+        /// 目标行。
+        row: u8,
+    },
+    /// 装备到某个装备位（`None`/`"none"` 表示卸下，回到背包）。
+    SetEquipSlot {
+        /// 物品序号。
+        index: usize,
+        /// 装备位名（`BodyLocation` 的变体名，如 `Head`）。
+        slot: String,
     },
     /// 设置/覆盖一个属性。
     SetStat {
@@ -433,6 +529,47 @@ impl EditSession {
                     item.flags.insert(d2s::ItemFlags::SOCKETED);
                 }
             }
+            ItemEdit::Relocate {
+                index,
+                page,
+                col,
+                row,
+            } => {
+                // 坐标是 4 位字段；容器行列数由用户设置决定，界面会先把越界挡掉
+                if *col > 15 || *row > 15 {
+                    return Err(EditError::Invalid(format!(
+                        "格子坐标必须在 0–15（收到 {col},{row}）"
+                    )));
+                }
+                let target = d2s::StorePage::from_raw(page.raw());
+                let item = self.item_mut(*index)?;
+                item.position.store_page = target;
+                item.position.inv_x = *col;
+                item.position.inv_y = *row;
+                // 放置模式跟着目标页走：装备页以外的都算"存放"
+                item.position.mode = match page {
+                    StorePageName::Equip => ItemMode::Equipped,
+                    StorePageName::Belt => ItemMode::InBelt,
+                    _ => ItemMode::Stored,
+                };
+            }
+            ItemEdit::SetEquipSlot { index, slot } => {
+                let item = self.item_mut(*index)?;
+                if slot.eq_ignore_ascii_case("none") {
+                    // 卸下：回到背包、模式改回"存放"
+                    item.position.body_location = d2s::BodyLocation::from_raw(0);
+                    item.position.store_page =
+                        d2s::StorePage::from_raw(StorePageName::Inventory.raw());
+                    item.position.mode = ItemMode::Stored;
+                } else {
+                    let Some(loc) = body_location_from_name(slot) else {
+                        return Err(EditError::Invalid(format!("未知的装备位：{slot}")));
+                    };
+                    item.position.body_location = loc;
+                    item.position.store_page = d2s::StorePage::from_raw(StorePageName::Equip.raw());
+                    item.position.mode = ItemMode::Equipped;
+                }
+            }
             ItemEdit::SetStat { index, stat, value } => {
                 let item = self.item_mut(*index)?;
                 let id = StatId(*stat);
@@ -549,5 +686,48 @@ impl EditSession {
             .items
             .get_mut(index)
             .ok_or_else(|| EditError::Invalid(format!("物品序号 {index} 越界（共 {total} 件）")))
+    }
+}
+
+/// 装备位名 → `BodyLocation`（大小写不敏感）。
+///
+/// `BodyLocation` 是开放枚举，没有内置的按名字查找，所以按原始值逐个比对变体的调试名。
+pub fn body_location_from_name(name: &str) -> Option<d2s::BodyLocation> {
+    for raw in 0u8..=20 {
+        let loc = d2s::BodyLocation::from_raw(raw);
+        if format!("{loc:?}").eq_ignore_ascii_case(name.trim()) {
+            return Some(loc);
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_page_names_roundtrip() {
+        for page in [
+            StorePageName::Inventory,
+            StorePageName::Equip,
+            StorePageName::Trade,
+            StorePageName::Cube,
+            StorePageName::Stash,
+            StorePageName::Belt,
+            StorePageName::Null,
+        ] {
+            assert_eq!(StorePageName::from_raw(page.raw()), Some(page));
+            assert_eq!(StorePageName::parse(page.as_str()), Some(page));
+        }
+        assert!(StorePageName::parse("Nope").is_none());
+        assert!(StorePageName::from_raw(9).is_none());
+    }
+
+    #[test]
+    fn equip_slot_names() {
+        assert!(body_location_from_name("Head").is_some());
+        assert!(body_location_from_name("head").is_some(), "大小写不敏感");
+        assert!(body_location_from_name("nope").is_none());
     }
 }

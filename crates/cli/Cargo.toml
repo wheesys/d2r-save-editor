@@ -20,3 +20,6 @@ serde_json = { workspace = true }
 [[bin]]
 name = "layout-probe"
 path = "src/bin/layout_probe.rs"
+[[bin]]
+name = "grid-probe"
+path = "src/bin/grid_probe.rs"

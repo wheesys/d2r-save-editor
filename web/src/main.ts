@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+
+import { bindGridDrag, renderInventory } from "./inventory";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import {
@@ -134,6 +136,8 @@ function renderWaypoints(list: WaypointsDto[]) {
 let selectedItem: number | null = null;
 /** 属性目录缓存 */
 let statCatalog: StatCatalogEntry[] = [];
+/** 当前布局设置（容器网格尺寸要用） */
+let currentLayout: LayoutSettings | null = null;
 
 /** 物品列表行：点一行进入明细 */
 function renderItems(list: ItemDto[]) {
@@ -190,6 +194,33 @@ function renderItems(list: ItemDto[]) {
     });
   });
   $("#items-section").classList.remove("hidden");
+  renderContainerView();
+}
+
+/** 渲染容器网格视图（背包/方块/箱子/腰带/装备位） */
+function renderContainerView() {
+  if (!currentLayout) return;
+  const host = $("#inventory");
+  host.innerHTML = renderInventory(currentLayout, items, selectedItem);
+  bindGridDrag(
+    host,
+    currentLayout,
+    items,
+    (index) => void selectItem(index),
+    async (index, page, col, row) => {
+      try {
+        const n = await call<number>("apply_item_edits", {
+          edits: [{ kind: "relocate", index, page, col, row }],
+        });
+        toast(`已移动（${n} 条修改）。点「保存」写入文件。`);
+        await loadAll();
+        await selectItem(index);
+      } catch (e) {
+        showError(e, "移动被拒绝");
+      }
+    },
+  );
+  $("#inventory-section").classList.remove("hidden");
 }
 
 /** 存储页中文缩写 */

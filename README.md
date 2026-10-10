@@ -80,6 +80,7 @@ cargo run -p d2r-cli -- view   <存档> [--json]           # 角色+技能+传�
 cargo run -p d2r-cli -- edit   <存档> --set '<JSON>'     # 编辑并保存（先校验后落盘）
 cargo run -p d2r-cli -- items  <存档> [--filter 关键字]  # 物品清单/明细（--json）
 cargo run -p d2r-cli -- item   <存档> --index N           # 单件物品明细（属性带中文名/步长）
+cargo run -p d2r-cli --bin grid-probe -- <存档> [--inv 16x8]  # 容器网格布局校验（物品落在哪一格/是否越界）
 cargo run -p d2r-cli -- stats  [--filter 关键字] [--all]  # 属性 ID ↔ 中文名对照（步长/参数位）
 cargo run -p d2r-cli -- export-items <存档> [--index N] --out bp.json   # 导出物品蓝图
 cargo run -p d2r-cli -- import-item  <存档> --blueprint bp.json --template N  # 导入物品
@@ -120,7 +121,7 @@ d2r edit 角色.d2s --set '[{"kind":"setLevel","level":90},
 | 5 物品编辑 | 🟢 查看明细（属性/耐久/数量/孔）、改耐久·数量·防御、增删属性、移动格子、删除物品 |
 | 5b 物品导入（自定义 JSON） | 🟢 物品导出/导入（模板克隆 + 属性覆盖）、属性位宽与移位校验（写盘后会被截断的值直接拒绝）、属性 ID ↔ 中文名对照（默认只列游戏会显示的属性） |
 | 6 佣兵装备 | ⬜ 待开始 |
-| 7 Tauri 界面整合 | 🟢 打开存档 → 角色/技能/传送点/物品 → 编辑 → 校验 → 保存；**物品明细面板**（属性中文名、改值、增删属性）、孔数、导入/导出物品 |
+| 7 Tauri 界面整合 | 🟢 打开存档 → **容器网格视图（装备位/背包/方块/箱子/腰带，可拖拽移动）** → 物品明细（属性中文名、改值、增删属性）→ 校验 → 保存；孔数、导入/导出物品 |
 
 > 桌面端的已知环境适配：Tauri 默认把 WebView2 数据目录设为 `%LOCALAPPDATA%\<identifier>`，
 > 某些受限环境下该目录创建会失败（`os error 5`）。因此窗口改为在代码里创建并显式指定
