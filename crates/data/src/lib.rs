@@ -18,6 +18,7 @@ pub mod itemname;
 pub mod placement;
 pub mod skillname;
 pub mod statlimit;
+pub mod statname;
 pub mod strings;
 pub mod table;
 
@@ -29,6 +30,7 @@ pub use placement::{
 };
 pub use skillname::SkillNamer;
 pub use statlimit::{StatLimit, StatLimits};
+pub use statname::{StatName, StatNamer};
 pub use strings::Strings;
 pub use table::{DataError, Table};
 

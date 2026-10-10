@@ -28,6 +28,7 @@ fn main() -> ExitCode {
         "edit" => cmd_edit(&args[1..]),
         "view" => cmd_view(&args[1..]),
         "items" => cmd_items(&args[1..]),
+        "stats" => cmd_stats(&args[1..]),
         "export-items" => cmd_export_items(&args[1..]),
         "import-item" => cmd_import_item(&args[1..]),
         "-h" | "--help" | "help" => {
@@ -52,6 +53,7 @@ fn usage() {
          d2r edit      <文件.d2s> --set <JSON> [--out <文件>]  编辑并保存（先校验后落盘）\n  \
          d2r view      <文件.d2s> [--json]                  角色/技能/传送点/物品总览（界面同源数据）\n  \
          d2r items     <文件.d2s> [--filter 关键字] [--json] 物品清单/明细\n  \
+         d2r stats     [--filter 关键字] [--json]           属性 ID ↔ 名称对照（编辑属性用）\n  \
          d2r export-items <文件.d2s> [--index N] [--out 文件.json]  导出物品蓝图\n  \
          d2r import-item  <文件.d2s> --blueprint 文件.json --template N [--dry-run]  导入物品\n  \
          d2r dataset   [--game <游戏目录>]  检查数据集\n  \
@@ -1121,6 +1123,54 @@ fn cmd_view(args: &[String]) -> ExitCode {
             st.equipped, st.with_sockets
         );
     }
+    ExitCode::SUCCESS
+}
+fn cmd_stats(args: &[String]) -> ExitCode {
+    let json = args.iter().any(|a| a == "--json");
+    let filter = arg_of(args, "--filter").map(|f| f.to_lowercase());
+    let ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    let catalog = ws.stat_catalog();
+    let items: Vec<&d2r_app::StatCatalogEntry> = match &filter {
+        Some(f) => catalog
+            .iter()
+            .filter(|e| {
+                e.name.to_lowercase().contains(f)
+                    || e.internal.to_lowercase().contains(f)
+                    || e.id.to_string() == *f
+            })
+            .collect(),
+        None => catalog.iter().collect(),
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&items).unwrap());
+        return ExitCode::SUCCESS;
+    }
+    println!(
+        "属性名表  : {} 个已解析（共 {} 个属性）",
+        catalog.len(),
+        ws.stat_name_count()
+    );
+    if let Some(f) = &filter {
+        println!("过滤      : {f:?} → {} 个", items.len());
+    }
+    println!();
+    println!(
+        "{:>5}  {:<24} {:<26} {:>6}  参数位",
+        "ID", "名称", "内部名", "步长"
+    );
+    for e in &items {
+        println!(
+            "{:>5}  {:<24} {:<26} {:>6}  {}",
+            e.id,
+            e.name,
+            e.internal,
+            e.step,
+            if e.has_param_bits { "是" } else { "" }
+        );
+    }
+    println!();
+    println!("提示：步长 > 1 的属性，值必须是步长的倍数（按位存储 + 移位），否则写入会被拒绝。");
     ExitCode::SUCCESS
 }
 fn cmd_export_items(args: &[String]) -> ExitCode {

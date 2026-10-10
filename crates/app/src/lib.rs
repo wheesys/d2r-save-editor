@@ -18,4 +18,5 @@ pub mod workspace;
 
 pub use bundle::BundleInfo;
 pub use dto::*;
+pub use workspace::StatCatalogEntry;
 pub use workspace::{default_game_dir, find_strings_dir, SaveOutcome, Workspace};

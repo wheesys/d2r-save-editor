@@ -25,6 +25,22 @@ pub struct SaveOutcome {
     pub edits: usize,
 }
 
+/// 属性目录条目（界面做"添加属性"下拉用）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatCatalogEntry {
+    /// 属性 ID。
+    pub id: u16,
+    /// 显示名（中文）。
+    pub name: String,
+    /// 内部名（数据表里的 `Stat`）。
+    pub internal: String,
+    /// 值的最小小步长。
+    pub step: i64,
+    /// 是否带参数位。
+    pub has_param_bits: bool,
+}
+
 /// 编辑器工作区。
 pub struct Workspace {
     /// 游戏目录（用于定位数据集）。
@@ -43,6 +59,8 @@ pub struct Workspace {
     layout: LayoutSettings,
     /// 属性取值上限（来自数据表的位宽列；空表表示不限制）。
     stat_limits: d2r_data::StatLimits,
+    /// 属性名解析器（属性 ID → 中文名/内部名/步长）。
+    stat_namer: d2r_data::StatNamer,
     /// 当前编辑会话。
     session: Option<EditSession>,
 }
@@ -129,8 +147,12 @@ impl Workspace {
             }
         }
 
-        // 属性位宽上限：装配完表之后立刻取一次（避免 apply 时再借表）
+        // 属性位宽上限与属性名：装配完表之后立刻取一次（避免 apply 时再借表）
         let stat_limits = d2r_data::StatLimits::from_store(&mut tables);
+        let stat_namer = match tables.get("ItemStatCost") {
+            Some(t) => d2r_data::StatNamer::new(t, &strings),
+            None => d2r_data::StatNamer::empty(),
+        };
 
         Self {
             game_dir,
@@ -138,6 +160,7 @@ impl Workspace {
             data_source: source,
             tables,
             stat_limits,
+            stat_namer,
             strings,
             lang: "zhCN".to_string(),
             layout: LayoutSettings::default(),
@@ -392,6 +415,39 @@ impl Workspace {
     /// 物品汇总统计。
     pub fn item_stats(&self) -> Result<ItemStats, AppError> {
         Ok(self.session()?.item_stats())
+    }
+
+    /// 属性名解析器（只读）。
+    pub fn stat_names(&self) -> &d2r_data::StatNamer {
+        &self.stat_namer
+    }
+
+    /// 属性目录：界面做"添加属性"下拉用。
+    ///
+    /// 只返回**解析出显示名**的属性（解析不出的对用户没意义）；
+    /// `step` 是该属性值的最小小步长（按位存储 + 移位决定）。
+    pub fn stat_catalog(&self) -> Vec<StatCatalogEntry> {
+        self.stat_namer
+            .named()
+            .into_iter()
+            .map(|s| StatCatalogEntry {
+                id: s.id,
+                name: s.display.clone(),
+                internal: s.internal.clone(),
+                step: s.step,
+                has_param_bits: s.has_param_bits,
+            })
+            .collect()
+    }
+
+    /// 某个属性的名字（查不到时返回 `属性#<id>`）。
+    pub fn stat_display_name(&self, id: u16) -> String {
+        self.stat_namer.display_or_id(id)
+    }
+
+    /// 解析出的属性名数量（0 表示没有属性名数据）。
+    pub fn stat_name_count(&self) -> usize {
+        self.stat_namer.len()
     }
 
     /// 属性取值上限表的条数（0 表示没有上限数据）。
