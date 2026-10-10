@@ -1,0 +1,20 @@
+# 统一行尾为 LF，避免 Windows 上 CRLF 转换造成 diff 噪声与脚本执行问题
+* text=auto eol=lf
+
+# 二进制文件不做文本处理
+*.png binary
+*.ico binary
+*.dll binary
+*.exe binary
+*.obj binary
+*.dat binary
+*.bin binary
+*.rar binary
+*.d2s binary
+*.d2i binary
+
+# 脚本显式按 LF 处理
+*.ps1 text eol=lf
+*.cmd text eol=lf
+*.c text eol=lf
+*.rs text eol=lf

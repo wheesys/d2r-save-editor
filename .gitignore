@@ -1,16 +1,21 @@
-# 样本文件（存档、数据表）不入库
-samples/
+# 样本文件（存档、数据表、游戏导出）不入库；只保留说明文档
+samples/*
+!samples/README.md
 
-# Rust
+# Rust 构建产物
 target/
-Cargo.lock
+# 应用型项目应提交 Cargo.lock 以复现构建（此前模板里忽略它，已修正）
 
 # Node / 前端
 node_modules/
 dist/
 
-# 本地工具
+# 本地工具与构建中间产物
 .spec-workflow/
+.tools/*.exe
+.tools/*.obj
+.tools/*.dll
+.tools/*.png
 
 # 系统与编辑器
 .DS_Store

@@ -1,0 +1,18 @@
+[package]
+name = "d2r-core"
+description = "D2R 存档（.d2s/.d2i）读写与校验内核"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+# 候选解析内核：d2s-rs（MIT，支持存档版本 96 与 97-105，含 .d2i 与版本转换）。
+# 先用它跑通往返一致性；是否长期采用由 tests/roundtrip.rs 的实测结果决定。
+d2s = "0.1.0"
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]

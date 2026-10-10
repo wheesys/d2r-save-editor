@@ -2,7 +2,50 @@
 
 暗黑破坏神2：重制版（Diablo II: Resurrected）单机存档修改器。Windows 桌面客户端，Rust + Tauri v2 实现。
 
-> 项目处于调研阶段，本仓库当前仅包含调研文档。
+> 状态：调研完成，Rust 内核骨架已可跑（`.d2s` 读写 + 往返校验 + 数据集加载），界面未开始。
+
+## 仓库结构
+
+```text
+crates/
+├── core/   d2r-core   存档读写、头部/版本识别、往返一致性校验
+├── data/   d2r-data   数据集加载（excel 表、字符串表、mod 描述），数据驱动不写死常量
+└── cli/    d2r        命令行工具：roundtrip / inspect / dataset
+samples/               本地样本（存档、旁车文件、导出的游戏数据；已 gitignore）
+.tools/                开发辅助脚本（CASC 提取器源码、UI 驱动脚本等）
+docs/                  调研与资料清单
+```
+
+## 开发
+
+```powershell
+# 构建 + 测试
+cargo build
+cargo test --workspace
+
+# 往返一致性校验（写路径的门槛：读入 → 原样写出 → 逐字节比对）
+cargo run -p d2r-cli -- roundtrip
+
+# 查看存档内容（--json 供界面调用）
+cargo run -p d2r-cli -- inspect "samples/saves/d2r-105/杜仲.d2s" --json
+
+# 检查数据集：表数量、与原版基准的差异表、字符串表
+cargo run -p d2r-cli -- dataset
+```
+
+环境变量：`D2R_GAME_DIR`（游戏目录）、`D2R_SAMPLES_DIR`（样本目录）。
+
+## 当前进度
+
+| 里程碑 | 状态 |
+|---|---|
+| 1 数据集加载器 | 🟡 已能读 loader 展开的 excel txt（88 张，含原版基准 86 张）并列出 mod 改动表；字符串表待 CASC 导出 |
+| 2 `.d2s` 读入→写出逐字节一致 | 🟡 8 个样本中 6 个逐字节一致，2 个已知问题见 `docs/next-steps-materials.md` §3.5 |
+| 3 容器与物品摆放校验 | ⬜ 待开始 |
+| 4 属性/技能/任务/传送点编辑 | ⬜ 待开始 |
+| 5 物品编辑与导入 | ⬜ 待开始 |
+| 6 佣兵装备 | ⬜ 待开始 |
+| 7 Tauri 界面整合 | ⬜ 待开始 |
 
 ## 功能目标
 
@@ -29,6 +72,8 @@
 ## 文档
 
 - [调研文档](docs/research.md)
+- [继续开发所需资料清单](docs/next-steps-materials.md)
+- [样本目录说明](samples/README.md)
 
 ## 许可证
 

@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/data",
+    "crates/cli",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+authors = ["wheesys"]
+
+[workspace.dependencies]
+d2r-core = { path = "crates/core" }
+d2r-data = { path = "crates/data" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+strip = true

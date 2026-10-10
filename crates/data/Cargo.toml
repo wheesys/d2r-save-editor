@@ -1,0 +1,16 @@
+[package]
+name = "d2r-data"
+description = "D2R 数据集加载（excel 表、字符串表、mod 描述），数据驱动不写死常量"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[[bin]]
+name = "compare-dirs"
+path = "src/bin/compare_dirs.rs"
