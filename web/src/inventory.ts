@@ -28,6 +28,19 @@ export interface GridSpec {
 /** 单格像素尺寸 */
 const CELL = 34;
 
+/** 物品代码 → 图标 data URL（启动时从后端取一次） */
+let iconByCode: Record<string, string> = {};
+
+/** 设置图标表（由 main.ts 启动时注入） */
+export function setItemIcons(icons: [string, string][]) {
+  iconByCode = Object.fromEntries(icons);
+}
+
+/** 取某物品代码的图标（没有则返回空字符串，界面会退化成只显示代码） */
+function iconOf(code: string): string {
+  return iconByCode[code] ?? "";
+}
+
 /** 装备位（背包页之外的固定槽位） */
 const EQUIP_SLOTS: { key: string; label: string }[] = [
   { key: "Head", label: "头" },
@@ -132,9 +145,13 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
         `width:${it.width * CELL - 2}px;height:${it.height * CELL - 2}px;`;
       const label = itemLabel(it);
       const socketNote = it.socketCount > 0 ? `<span class="blk-sock">${it.socketedCount}/${it.socketCount}</span>` : "";
+      const icon = iconOf(it.code);
+      const art = icon
+        ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it.code)}" draggable="false" />`
+        : `<span class="blk-code">${escapeHtml(it.code)}</span>`;
       return `<div class="blk q-${it.quality.toLowerCase()}${sel}" style="${style}"
         data-item="${it.index}" title="${escapeAttr(tooltip(it))}">
-        <span class="blk-code">${escapeHtml(it.code)}</span>
+        ${art}
         <span class="blk-name">${escapeHtml(label)}</span>
         ${socketNote}
       </div>`;
@@ -158,9 +175,13 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
         const data = it ? ` data-item="${it.index}"` : "";
         const title = it ? escapeAttr(tooltip(it)) : `${EQUIP_SLOTS[i]?.label ?? slotKey}（空）`;
         const sock = it && it.socketCount > 0 ? `<span class="blk-sock">${it.socketedCount}/${it.socketCount}</span>` : "";
+        const icon = it ? iconOf(it.code) : "";
+        const art = icon
+          ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it ? it.code : "")}" draggable="false" />`
+          : `<span class="blk-code">${escapeHtml(it ? it.code : (EQUIP_SLOTS[i]?.label ?? ""))}</span>`;
         return `<div class="${cls}" style="left:${(i % spec.cols) * CELL}px;top:${Math.floor(i / spec.cols) * CELL}px;width:${CELL - 2}px;height:${CELL - 2}px"
           ${data} title="${title}">
-          <span class="blk-code">${escapeHtml(it ? it.code : (EQUIP_SLOTS[i]?.label ?? ""))}</span>
+          ${art}
           <span class="blk-name">${escapeHtml(it ? label : "空")}</span>
           ${sock}
         </div>`;

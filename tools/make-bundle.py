@@ -65,6 +65,14 @@ def collect() -> list[tuple[pathlib.Path, pathlib.Path]]:
                 continue
             out.append((p, pathlib.Path("strings") / p.name))
 
+    # icons/ 不是本脚本产出的（见 tools/make-icons.py），
+    # 但它是数据包的一部分，所以一起计入清单，避免打包时漏掉。
+    icons_dir = DST / "icons"
+    if icons_dir.is_dir():
+        for p in sorted(icons_dir.rglob("*")):
+            if p.is_file():
+                out.append((p, p.relative_to(DST)))
+
     return out
 
 
@@ -74,19 +82,24 @@ def build(quiet: bool = False) -> dict:
         print("[x] 没有找到来源数据。先运行：pwsh -File tools/fetch-data.ps1", file=sys.stderr)
         return {}
 
-    if DST.exists():
-        shutil.rmtree(DST)
+    # 只重建 excel/strings；icons/ 保留（那是 make-icons.py 的产物）
+    for group in ("excel", "strings"):
+        d = DST / group
+        if d.exists():
+            shutil.rmtree(d)
     files = []
     for src, rel in items:
         dst = DST / rel
         dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
+        # icons 已在目标位置，不需要自拷贝
+        if src.resolve() != dst.resolve():
+            shutil.copy2(src, dst)
         files.append(
             {
                 "path": rel.as_posix(),
                 "size": dst.stat().st_size,
                 "sha256": sha256_of(dst),
-                "source": str(src.relative_to(REPO)).replace("\\", "/"),
+                "source": "bundle/icons" if rel.parts[0] == "icons" else str(src.relative_to(REPO)).replace("\\", "/"),
             }
         )
 
@@ -95,6 +108,7 @@ def build(quiet: bool = False) -> dict:
         "note": "随程序分发的本地数据包；由 tools/make-bundle.py 在本机生成。",
         "excel_files": sum(1 for f in files if f["path"].startswith("excel/")),
         "string_files": sum(1 for f in files if f["path"].startswith("strings/")),
+        "icon_files": sum(1 for f in files if f["path"].startswith("icons/")),
         "total_bytes": sum(f["size"] for f in files),
         "files": files,
     }
@@ -105,6 +119,7 @@ def build(quiet: bool = False) -> dict:
         print(f"数据包已生成：{len(files)} 个文件 / {mb:.2f} MB → {DST.relative_to(REPO)}")
         print(f"  excel   {manifest['excel_files']} 个")
         print(f"  strings {manifest['string_files']} 个")
+        print(f"  icons   {manifest['icon_files']} 个")
     return manifest
 
 

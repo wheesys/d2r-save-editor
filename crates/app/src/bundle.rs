@@ -32,6 +32,67 @@ pub fn available() -> bool {
     cfg!(feature = "bundled-data") && embedded::AVAILABLE && !embedded::FILES.is_empty()
 }
 
+/// 物品代码 → 图标的 data URL（`data:image/png;base64,...`）。
+///
+/// 为什么用 data URL：界面是网页，直接从内嵌数据生成数据 URL 就不需要
+/// 静态文件服务或额外的 Tauri 资源协议；图标很小（323 张共约 1 MB），
+/// 一次全量返回比逐个请求更简单。
+///
+/// 数据包缺失或没有 icons 时返回空表（界面会退化成只显示文字）。
+pub fn item_icons() -> Vec<(String, String)> {
+    let Some(map) = text_of("icons/IMAGE-MAP.tsv") else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(map.lines().count());
+    for line in map.lines() {
+        let Some((code, file)) = line.split_once('\t') else { continue };
+        let code = code.trim();
+        let file = file.trim();
+        if code.is_empty() || file.is_empty() {
+            continue;
+        }
+        let Some(bytes) = raw_of(&format!("icons/{file}")) else { continue };
+        out.push((code.to_string(), png_data_url(&bytes)));
+    }
+    out
+}
+
+/// 图标的原始字节（给需要自己处理的调用方）。
+pub fn icon_bytes(file_name: &str) -> Option<Vec<u8>> {
+    raw_of(&format!("icons/{file_name}"))
+}
+
+/// 按包内相对路径取原始字节（路径大小写不敏感）。
+fn raw_of(rel: &str) -> Option<Vec<u8>> {
+    let wanted = rel.to_ascii_lowercase();
+    embedded::FILES
+        .iter()
+        .find(|(name, _, _)| name.to_ascii_lowercase() == wanted)
+        .and_then(|(_, data, len)| unpack(data, *len))
+}
+
+/// 编码成 PNG 的 data URL。
+fn png_data_url(bytes: &[u8]) -> String {
+    format!("data:image/png;base64,{}", base64_encode(bytes))
+}
+
+/// 极简 base64 编码（避免为几十行代码再加一个依赖）。
+fn base64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(triple >> 18) as usize & 63] as char);
+        out.push(TABLE[(triple >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 { TABLE[(triple >> 6) as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 2 { TABLE[triple as usize & 63] as char } else { '=' });
+    }
+    out
+}
+
 /// 解压一个内嵌文件。
 fn unpack(compressed: &[u8], raw_len: usize) -> Option<Vec<u8>> {
     use std::io::Read;
@@ -192,5 +253,47 @@ mod tests {
         let strings = string_files();
         assert!(strings.len() >= 15, "字符串表文件偏少：{}", strings.len());
         assert!(strings.iter().any(|(n, _)| n == "item-names.json"));
+
+        let icons = item_icons();
+        assert!(icons.len() > 250, "图标数量偏少：{}", icons.len());
+        assert!(icons.iter().any(|(c, _)| c == "hp1"), "应有治疗药水的图标");
+        assert!(
+            icons.iter().all(|(_, url)| url.starts_with("data:image/png;base64,")),
+            "图标应是 PNG data URL"
+        );
+        // 编码结果必须能解回 PNG（否则界面拿到的是坏图）
+        let (_, url) = icons.iter().find(|(c, _)| c == "hp1").unwrap();
+        let payload = url.trim_start_matches("data:image/png;base64,");
+        let bytes = base64_decode_for_test(payload);
+        assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "解出来应是 PNG 头");
     }
+}
+
+/// 测试用：极简 base64 解码，用来验证上面的编码。
+#[cfg(test)]
+fn base64_decode_for_test(input: &str) -> Vec<u8> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lookup = [255u8; 256];
+    for (i, c) in TABLE.iter().enumerate() {
+        lookup[*c as usize] = i as u8;
+    }
+    let mut out = Vec::new();
+    let mut buffer = 0u32;
+    let mut bits = 0u32;
+    for c in input.bytes() {
+        if c == b'=' {
+            break;
+        }
+        let v = lookup[c as usize];
+        if v == 255 {
+            continue;
+        }
+        buffer = (buffer << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    out
 }

@@ -181,6 +181,11 @@ pub fn read_blueprint(path: String) -> R<String> {
 pub fn current_save(state: State<'_, AppState>) -> Option<SaveInfo> {
     state.0.lock().unwrap().current_save()
 }
+/// 物品代码 → 图标的 data URL（物品网格用）。数据包缺失时返回空表。
+#[tauri::command]
+pub fn item_icons() -> Vec<(String, String)> {
+    d2r_app::bundle::item_icons()
+}
 /// 应用版本信息。
 #[tauri::command]
 pub fn versions() -> serde_json::Value {

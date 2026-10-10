@@ -29,6 +29,7 @@ fn main() {
     println!("cargo:rerun-if-changed=data-bundle/BUNDLE.json");
     println!("cargo:rerun-if-changed=data-bundle/excel");
     println!("cargo:rerun-if-changed=data-bundle/strings");
+    println!("cargo:rerun-if-changed=data-bundle/icons");
 
     let profile = std::env::var("PROFILE").unwrap_or_default();
     // CI 上允许"无数据构建"：公共仓库不能带数据，CI 只为验证可编译并产出可启动的 exe。
@@ -56,7 +57,7 @@ fn main() {
     let mut entries: Vec<(String, PathBuf, usize)> = Vec::new();
     let mut raw_total = 0usize;
     let mut comp_total = 0usize;
-    for group in ["excel", "strings"] {
+    for group in ["excel", "strings", "icons"] {
         let dir = bundle.join(group);
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;

@@ -85,6 +85,7 @@ pub fn run() {
             commands::write_blueprint,
             commands::read_blueprint,
             commands::current_save,
+            commands::item_icons,
             commands::apply_edits,
             commands::verify,
             commands::save,
