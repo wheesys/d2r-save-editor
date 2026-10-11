@@ -13,6 +13,8 @@ export interface SaveInfo {
   size: number;
   checksum: number | null;
   roundtripIdentical: boolean;
+  /** 存档里的角色名（.d2i 为空），保存前用来确认要覆盖谁 */
+  characterName: string;
 }
 
 export interface CharacterDto {

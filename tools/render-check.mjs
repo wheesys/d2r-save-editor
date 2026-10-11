@@ -196,6 +196,32 @@ console.log("=== 5. 装备位按游戏角色装备页布局 ===");
   );
 }
 
+console.log("=== 6. 页面结构（吸顶靠结构保证，不能靠眼睛看） ===");
+{
+  // 页签条必须**嵌在 header 里**：header 是 sticky，页签作为它的子元素才会
+  // 跟着一起停住。两个同级 sticky 各自贴 top 会互相顶掉（表现为页签消失）。
+  // 这条只能查 HTML，所以放在这里而不是 JS 渲染断言里。
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+
+  const headerStart = html.indexOf("<header");
+  const headerEnd = html.indexOf("</header>");
+  const tabsAt = html.indexOf('id="tabs"');
+  check("页签条在 header 内部（吸顶靠结构）", headerStart >= 0 && tabsAt > headerStart && tabsAt < headerEnd,
+    `header=${headerStart}..${headerEnd}，tabs=${tabsAt}`);
+  check("每个页签都有 data-tab", (html.match(/data-tab="/g) ?? []).length === 6,
+    `实际 ${(html.match(/data-tab="/g) ?? []).length} 个`);
+  check(
+    "tab 面板与页签一一对应",
+    ["char", "skills", "quests", "items", "merc", "settings"].every((k) => html.includes(`id="tab-${k}"`)),
+    "有页签找不到对应面板",
+  );
+  // 角色区块里必须有表单子元素：曾经用 innerHTML 覆盖整块，把这些元素删掉，
+  // 渲染时报"缺少元素 #f-level"
+  check("角色区块保留了表单子元素", html.includes('id="f-level"') && html.includes('id="f-strength"'));
+  check("角色区块有容器存在", html.includes('id="skills"') && html.includes('id="inventory"'));
+}
+
 console.log("");
 if (failures === 0) {
   console.log("全部通过：容器划分、像素位置、越界处理、图标回退、装备槽都符合预期。");

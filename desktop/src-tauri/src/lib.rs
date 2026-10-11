@@ -42,26 +42,11 @@ pub fn run() {
             builder.build()?;
             Ok(())
         })
-        // 开发/自测用：设置 D2R_OPEN_SAVE=<存档路径> 时，页面加载完成后自动打开该存档，
-        // 免去每次手点文件对话框（对正常使用没有影响）。
-        .on_page_load(|window, _payload| {
-            let Ok(path) = std::env::var("D2R_OPEN_SAVE") else {
-                return;
-            };
-            if path.is_empty() {
-                return;
-            }
-            use tauri::Manager;
-            // app_handle() 返回的是临时值，先 clone 成有所有权的 handle 再取 state
-            let handle = window.app_handle().clone();
-            let shared = handle.state::<AppState>().0.clone();
-            if let Ok(mut workspace) = shared.lock() {
-                match workspace.open(&path) {
-                    Ok(info) => eprintln!("D2R_OPEN_SAVE：已打开 {}", info.path),
-                    Err(e) => eprintln!("D2R_OPEN_SAVE：打开失败 {e}"),
-                }
-            };
-        })
+        // 启动**不**自动打开任何存档。
+        //
+        // 这是刻意的安全设计：自动带出一个可编辑的存档，万一用户没注意就改了值
+        // 再保存，会直接写坏真实存档。启动后停在空状态，必须由用户显式选择文件。
+        // （此前有一个 `D2R_OPEN_SAVE` 环境变量开关，为截图核对方便而加，已移除。）
         .invoke_handler(tauri::generate_handler![
             commands::dataset_info,
             commands::open_save,

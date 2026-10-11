@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <!--
+      页签条放在 header **里面**：header 是 sticky，页签作为它的子元素
+      天然跟着一起停住。两个同级 sticky 各自贴 top 会互相顶掉（页签会消失）。
+    -->
     <header>
       <h1>D2R 存档修改器</h1>
       <div class="toolbar">
@@ -16,17 +20,17 @@
         <span id="dirty" class="badge hidden">有未保存修改</span>
       </div>
       <div id="dataset" class="muted"></div>
-    </header>
 
-    <!-- 分页：把原来一整条长页面拆成 5 个页签 -->
-    <nav id="tabs" class="tabs hidden">
-      <button class="tab active" data-tab="char">角色</button>
-      <button class="tab" data-tab="skills">技能</button>
-      <button class="tab" data-tab="quests">任务</button>
-      <button class="tab" data-tab="items">物品栏</button>
-      <button class="tab" data-tab="merc">佣兵</button>
-      <button class="tab" data-tab="settings">设置</button>
-    </nav>
+      <!-- 分页：把原来一整条长页面拆成几个页签 -->
+      <nav id="tabs" class="tabs hidden">
+        <button class="tab active" data-tab="char">角色</button>
+        <button class="tab" data-tab="skills">技能</button>
+        <button class="tab" data-tab="quests">任务</button>
+        <button class="tab" data-tab="items">物品栏</button>
+        <button class="tab" data-tab="merc">佣兵</button>
+        <button class="tab" data-tab="settings">设置</button>
+      </nav>
+    </header>
 
     <main>
       <!-- ===== 角色 ===== -->

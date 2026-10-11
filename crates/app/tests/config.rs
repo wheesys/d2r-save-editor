@@ -107,26 +107,60 @@ fn config_without_recent_paths_loads_empty() {
     assert!(settings.recent_paths.is_empty(), "缺字段应是空表");
 }
 
-/// 工作区把配置读进来当默认布局：写一份配置后再建工作区，布局要跟着变。
+/// **回归**：设置文件里的布局要被读回来当默认布局，`set_layout` 也要写回去。
+///
+/// 这条链路曾经断过：`set_layout` 已改成返回 `Result` 并写盘，但 Tauri 命令
+/// 忽略了返回值，界面上改了尺寸 → 内存生效、磁盘没写 → 重开就丢。
+/// 修好后加这个测试盯着，避免再出现"改了没生效"。
 #[test]
-fn workspace_picks_up_saved_layout() {
-    // 注意：这里只能验证 ConfigStore 的读写链路——Workspace 用的是默认位置，
-    // 而默认位置在 exe 同级，测试进程不方便替换。真实链路由桌面端启动验证。
-    let path = dir("workspace").join("settings.json");
+fn workspace_loads_and_persists_layout() {
+    let path = dir("ws-layout").join("settings.json");
     let store = ConfigStore::at(&path);
-    let settings = Settings {
-        layout: d2r_core::LayoutSettings {
-            inventory_cols: 12,
-            inventory_rows: 6,
-            ..d2r_core::LayoutSettings::default()
-        },
-        layout_confirmed: true,
-        ..Settings::default()
-    };
-    store.save(&settings).unwrap();
-    let back = store.load().unwrap();
+
+    // 先写一份"用户设过 16×8 + 佣兵全装备"的设置
+    store
+        .save(&Settings {
+            layout: d2r_core::LayoutSettings {
+                inventory_cols: 16,
+                inventory_rows: 8,
+                stash_cols: 16,
+                stash_rows: 16,
+                merc_full_equipment: true,
+                confirmed_by_user: true,
+                ..d2r_core::LayoutSettings::default()
+            },
+            layout_confirmed: true,
+            ..Settings::default()
+        })
+        .unwrap();
+
+    // 工作区建起来时就应该带上这套设置（不用用户重填）
+    let mut ws = d2r_app::Workspace::with_config("D:\\nonexistent", ConfigStore::at(&path));
+    let loaded = ws.layout().clone();
     assert_eq!(
-        (back.layout.inventory_cols, back.layout.inventory_rows),
-        (12, 6)
+        (loaded.inventory_cols, loaded.inventory_rows),
+        (16, 8),
+        "设置文件里的尺寸应成为默认布局"
     );
+    assert!(loaded.merc_full_equipment, "佣兵全装备也应读回来");
+
+    // set_layout 必须真的写盘（这是当年漏掉的一步）
+    ws.set_layout(d2r_core::LayoutSettings {
+        inventory_cols: 12,
+        inventory_rows: 6,
+        ..d2r_core::LayoutSettings::default()
+    })
+    .expect("设置应能写盘");
+
+    let on_disk = store.load().expect("应能从磁盘读回");
+    assert_eq!(
+        (on_disk.layout.inventory_cols, on_disk.layout.inventory_rows),
+        (12, 6),
+        "set_layout 必须把新尺寸写进文件"
+    );
+    assert!(on_disk.layout.confirmed_by_user, "写盘时应标记为用户已确认");
+
+    // 再建一个工作区，应看到刚写的那份
+    let ws2 = d2r_app::Workspace::with_config("D:\\nonexistent", ConfigStore::at(&path));
+    assert_eq!(ws2.layout().inventory_cols, 12, "重开后应带上新尺寸");
 }

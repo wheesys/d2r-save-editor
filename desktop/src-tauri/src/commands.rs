@@ -132,10 +132,12 @@ pub fn layout_questions(state: State<'_, AppState>) -> R<Vec<String>> {
     state.0.lock().unwrap().layout_questions()
 }
 
-/// 用户确认/修改布局设置。
+/// 用户确认/修改布局设置（会写进设置文件，下次启动直接带上）。
 #[tauri::command]
-pub fn set_layout(state: State<'_, AppState>, layout: d2r_core::LayoutSettings) {
-    state.0.lock().unwrap().set_layout(layout);
+pub fn set_layout(state: State<'_, AppState>, layout: d2r_core::LayoutSettings) -> R<()> {
+    // 注意：必须走返回 Result 的版本，它内部才会写盘。
+    // 之前这里忽略了返回值，导致"设了尺寸，重开又没了"。
+    state.0.lock().unwrap().set_layout(layout)
 }
 
 /// 按当前布局做越界校验。

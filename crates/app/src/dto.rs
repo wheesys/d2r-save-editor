@@ -35,6 +35,10 @@ pub struct SaveInfo {
     pub checksum: Option<u32>,
     /// 往返是否逐字节一致。
     pub roundtrip_identical: bool,
+    /// 存档里的角色名（`.d2i` 或读不到时为空）。
+    ///
+    /// 用途是保存前给用户确认"要覆盖的是哪个角色"——同目录下多个存档容易改错。
+    pub character_name: String,
 }
 
 /// 角色信息（可编辑项）。

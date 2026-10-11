@@ -203,18 +203,16 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
   pointer-events: none;
 }
 /* ===== 页签 ===== */
+/* 页签条：放在 header 内部，由 header 的 sticky 一起带住，所以这里不需要
+   position: sticky（同级两个 sticky 会互相顶掉，表现为页签消失）。
+   用负外边距抵掉 header 的左右/底部内边距，让分割线贴到 header 边缘。 */
 .tabs {
   display: flex;
   gap: 4px;
+  margin: 10px -18px -14px;
   padding: 0 18px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
-  /* 吸顶：跟着 header 一起停住，滚动内容时页签始终可见。
-     `top` 由脚本实测 header 高度后写入 --header-h（数据集那行会换行，高度不固定，
-     写死数值会在窄窗口下露缝或被挡住）。 */
-  position: sticky;
-  top: var(--header-h, 96px);
-  z-index: 4;
 }
 .tab {
   background: transparent;
@@ -321,12 +319,13 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 }
 .merc-body { display: flex; flex-direction: column; line-height: 1.25; font-size: 13px; }
 .merc-edit { margin-left: auto; font-size: 11px; color: #9a9a9a; }
-/* 未打开存档时的提示 */
+/* 未打开存档时的提示（插在区块里的一个段落，不用卡片，避免多出一层边框） */
 .empty-hint {
   color: #9a9a9a;
   font-size: 14px;
   line-height: 1.7;
-  padding: 8px 2px;
+  margin: 0;
+  padding: 4px 0 8px;
 }
 .empty-hint code {
   background: var(--panel-2);

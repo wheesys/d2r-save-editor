@@ -130,6 +130,15 @@ impl Workspace {
     ///    作为**补充**合并（mod 改了表时优先用游戏目录的版本）；
     /// 3. 开发期仓库里的 `samples/game-data`（CLI 开发者方便）。
     pub fn new(game_dir: impl Into<PathBuf>) -> Self {
+        Self::with_config(game_dir, crate::config::ConfigStore::new())
+    }
+
+    /// 用**指定**的设置文件构建工作区（测试用）。
+    ///
+    /// 存在的意义是让"设置读回来当默认布局"这条链路可测——
+    /// 曾经 Tauri 命令忽略了 `set_layout` 的返回值，界面上改了尺寸却写不进磁盘，
+    /// 重开就丢；当时没有任何测试盯着这条链路。
+    pub fn with_config(game_dir: impl Into<PathBuf>, config: crate::config::ConfigStore) -> Self {
         let game_dir = game_dir.into();
 
         // 1) 内置数据包
@@ -186,7 +195,6 @@ impl Workspace {
         // 这样"设置过一次"之后每次打开任何角色都不用再填；
         // 最近打开的路径也一起读回来，用于给"打开存档"对话框定起始目录。
         // 读失败（没有文件/内容坏了）就退回默认值，不让配置问题挡住主流程。
-        let config = crate::config::ConfigStore::new();
         let saved = config.load();
         let layout = saved.as_ref().map(|s| s.layout.clone()).unwrap_or_default();
         let recent = saved.map(|s| s.recent_paths).unwrap_or_default();
@@ -261,6 +269,11 @@ impl Workspace {
                 .map(|_| 0)
                 .or(Some(session.file.header.checksum)),
             roundtrip_identical: session.file.check_roundtrip().identical,
+            // 角色名用于保存前确认"要覆盖的是谁"；.d2i 没有角色名
+            character_name: match session.file.kind {
+                SaveKind::Character => session.file.save.character.name.clone(),
+                SaveKind::Stash => String::new(),
+            },
         };
         self.session = Some(session);
         self.current = Some(info.clone());

@@ -91,11 +91,15 @@ function renderSaveInfo(info: SaveInfo) {
   const rows: [string, string][] = [
     ["路径", info.path],
     ["类型", info.kind === "stash" ? "共享储物箱（.d2i）" : "角色存档（.d2s）"],
+  ];
+  // 角色名：同目录下多个存档很容易改错文件，显式显示一下
+  if (info.characterName) rows.push(["角色", info.characterName]);
+  rows.push(
     ["存档版本", String(info.version)],
     ["文件大小", `${info.size} 字节`],
     ["校验和", info.checksum === null ? "无（.d2i 不存）" : `0x${(info.checksum >>> 0).toString(16).toUpperCase()}`],
     ["往返一致", info.roundtripIdentical ? "是" : "否（结构有差异，谨慎保存）"],
-  ];
+  );
   $("#save-info").innerHTML = rows.map(([k, v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join("");
   $("#overview").classList.remove("hidden");
 }
@@ -493,6 +497,8 @@ async function loadStatCatalog() {
 }
 
 async function loadAll() {
+  // 真实内容开始渲染，先去掉"未打开存档"的提示
+  clearEmptyState();
   // 数据集那行由 refreshDataset() 整行重建：不能在这里用 `+=` 追加，
   // 否则每调用一次 loadAll() 就多贴一段（刷新/保存后都会调用）。
   bundleInfo = await loadBundleInfo();
@@ -770,7 +776,6 @@ async function checkBounds() {
   }
 }
 
-/** 启动自检：后端若已打开存档（例如开发时用 D2R_OPEN_SAVE 自动打开），直接进入编辑界面 */
 /**
  * 切换页签。
  *
@@ -788,12 +793,21 @@ function activateTab(key: string) {
   if (key === "items") renderContainerView();
 }
 /**
- * 启动时若后端已经打开了存档（`D2R_OPEN_SAVE` 或命令行传入），直接把它显示出来。
+ * 启动时**不**自动打开任何存档。
  *
- * 注意：共享箱（.d2i）**也要**走 `loadAll()`——否则物品页签会是空的
- * （曾经就是这个 bug：箱子打开了却什么都没渲染）。
+ * 这是刻意的安全设计：自动带出一个可编辑的存档，万一用户没注意就改了值再保存，
+ * 会直接写坏真实存档。启动后停在空状态，必须由用户显式选择文件。
+ *
+ * 这里只保留一次"后端是否已经有打开的存档"的检查：正常启动永远是 `None`，
+ * 但保留它可以让将来加"命令行传入存档"这类功能时不用再改前端。
  */
-async function bootIfAlreadyOpen() {
+/**
+ * 启动自检：后端若**已经**打开过存档就直接进入编辑界面。
+ *
+ * 正常启动永远是"没有"——应用刻意不自动打开存档（自动带出可编辑存档有改错的风险）。
+ * 保留这个检查是为了将来加"命令行传入存档"之类的入口时不用再改前端。
+ */
+async function checkAlreadyOpen() {
   try {
     const info = await call<SaveInfo | null>("current_save");
     if (!info) return;
@@ -838,13 +852,12 @@ async function loadIcons() {
  *
  * 为什么需要它：各区块默认是隐藏的（`hidden`），没打开存档时点页签就是一片空白，
  * 看起来像"坏了"。这里把"该做什么"直接写在页签里，不用猜。
+ *
+ * **只能"插"不能"覆盖"**：这些区块里本来就有子元素（角色表单的 `#f-level` 等），
+ * 直接覆盖 `innerHTML` 会把它们删掉，之后 `loadAll()` 渲染时就报"缺少元素"。
+ * 所以提示是额外插入一个 `[data-empty-hint]` 节点，渲染真实内容前再删掉它。
  */
 function renderEmptyState() {
-  const hint = (text: string) =>
-    `<div class="card"><div class="empty-hint">${text}<br/><br/>` +
-    `点左上角 <b>「打开存档…」</b> 选择角色存档（<code>.d2s</code>）或共享储物箱（<code>.d2i</code>）。</div></div>`;
-
-  // 这些区块在有存档时会被各自的渲染函数显示出来，所以只要先把提示放进去
   const placeholders: [string, string][] = [
     ["#char-section", "这里显示角色属性、金币与经验。"],
     ["#skills-section", "这里显示该角色的技能加点。"],
@@ -857,22 +870,23 @@ function renderEmptyState() {
   ];
   for (const [sel, text] of placeholders) {
     const el = $(sel);
-    el.innerHTML = hint(text);
+    if (el.querySelector("[data-empty-hint]")) continue;
+    const hint = document.createElement("p");
+    hint.className = "empty-hint";
+    hint.dataset.emptyHint = "1";
+    hint.innerHTML =
+      `${text}<br /><br />点左上角 <b>「打开存档…」</b> ` +
+      `选择角色存档（<code>.d2s</code>）或共享储物箱（<code>.d2i</code>）。`;
+    el.prepend(hint);
     el.classList.remove("hidden");
   }
 }
 
-/**
- * 把 header 的实际高度写进 CSS 变量 `--header-h`，供吸顶的页签条定位。
- *
- * 为什么用脚本量：header 里有工具栏与数据集那行，后者会在窄窗口换行，
- * 高度不是固定值；写死数值会导致页签条露缝或被遮住一小条。
- */
-function syncHeaderHeight() {
-  const header = document.querySelector("header");
-  if (!header) return;
-  document.documentElement.style.setProperty("--header-h", `${header.offsetHeight}px`);
+/** 去掉"未打开存档"的提示（真实内容开始渲染时调用）。 */
+function clearEmptyState() {
+  document.querySelectorAll("[data-empty-hint]").forEach((el) => el.remove());
 }
+
 
 function bind() {
   // 明细面板：应用该物品的修改 / 添加属性
@@ -965,12 +979,8 @@ function bind() {
   // 还没打开存档前，每个页签先显示"该做什么"，避免点进去看到一片空白
   renderEmptyState();
 
-  // 页签条吸顶：把 header 的实际高度写进 CSS 变量。
-  // 数据集那行文字会换行，header 高度随窗口宽度变，所以不能写死数值。
-  syncHeaderHeight();
-  window.addEventListener("resize", syncHeaderHeight);
 
-  void bootIfAlreadyOpen();
+  void checkAlreadyOpen();
 
   // 开发/自测用：`VITE_INITIAL_TAB=quests` 时启动就切到该页签，方便截图核对。
   // 正常构建里该值是 undefined，等价于不生效。
