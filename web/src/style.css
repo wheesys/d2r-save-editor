@@ -450,3 +450,20 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 
 /* 未归类技能：平铺列表 */
 .skill-list { display: flex; flex-direction: column; gap: 4px; min-width: 260px; }
+
+/* 拖拽时跟随光标的浮动标签（指针拖拽用，不依赖 HTML5 拖放） */
+.drag-ghost {
+  position: fixed;
+  z-index: 999;
+  pointer-events: none;
+  padding: 2px 6px;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--panel-2);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  opacity: 0.9;
+  white-space: nowrap;
+}
+/* 拖拽中禁止选中文本，否则会拉出一片蓝 */
+.grid .blk { user-select: none; }

@@ -110,6 +110,15 @@ console.log("=== 2. 物品块的位置与占格（像素级）===");
   check("宽高按占格换算", html.includes(`width:${2 * CELL - 2}px;height:${3 * CELL - 2}px`));
   check("品质样式挂在块上", html.includes("q-superior") === false && html.includes("q-normal"));
   check("块上带物品序号", html.includes('data-item="7"'));
+
+  // **绝不能给物品块加 `draggable`**：WebView2 里设了它的元素会把 click 吞掉，
+  // 表现就是"背包里的物品点不开属性弹窗"（用户实际遇到过）。
+  // 拖拽已改用指针事件实现，不需要 HTML5 拖放。
+  check(
+    "物品块没有 draggable 属性（否则点不开弹窗）",
+    !html.includes("draggable"),
+    html.match(/draggable[^ >]*/)?.[0] ?? "",
+  );
 }
 
 console.log("=== 3. 越界物品要单独列出而不是消失 ===");

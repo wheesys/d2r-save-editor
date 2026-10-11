@@ -224,7 +224,7 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
             ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it.code)}" />`
             : `<span class="blk-code">${escapeHtml(it.code)}</span>`;
           return `<div class="blk q-${it.quality.toLowerCase()}${sel}" style="${style}"
-        data-item="${it.index}" draggable="true" title="${escapeAttr(tooltip(it))}">
+        data-item="${it.index}" title="${escapeAttr(tooltip(it))}">
         ${art}
         <span class="blk-name">${escapeHtml(label)}</span>
         ${socketNote}
@@ -303,7 +303,7 @@ function renderSlotBoxes(mine: ItemDto[], selected: number | null): string {
     const h = Math.round(slot.h * EQUIP_SCALE);
     // 槽位够大才放名字（小槽放名字会溢出）
     const showName = w >= 46 && !it;
-    return `<div class="${cls}${slot.estimated ? " estimated" : ""}" draggable="${it ? "true" : "false"}"
+    return `<div class="${cls}${slot.estimated ? " estimated" : ""}"
       style="left:${Math.round(slot.x * EQUIP_SCALE)}px;top:${Math.round(slot.y * EQUIP_SCALE)}px;width:${w}px;height:${h}px"
       ${data} title="${title}">
       ${art}
@@ -369,47 +369,108 @@ export function bindGridDrag(
 ) {
   root.querySelectorAll<HTMLElement>(".blk[data-item]").forEach((el) => {
     el.addEventListener("click", () => onSelect(Number(el.dataset.item)));
-    // 逐个判断所属容器能不能拖：道具块在 `.grid` 里、点的是数值网格就是可拖的；
-    // 点的是 `.doll`（装备页/佣兵，固定槽）就不给拖。
-    const grid = el.closest(".grid") as HTMLElement | null;
-    const canDrag = grid !== null && !grid.classList.contains("doll");
-    el.draggable = canDrag;
-    if (!canDrag) return;
-    el.addEventListener("dragstart", (ev) => {
-      const dt = (ev as DragEvent).dataTransfer;
-      if (!dt) return;
-      dt.setData("text/plain", el.dataset.item!);
-      // 不设 effectAllowed 时某些环境拿不到 dropEffect，拖动看起来"没反应"
-      dt.effectAllowed = "move";
-    });
+    // **不要设 `draggable`**：WebView2 里设了它的元素会把 click 吞掉，
+    // 表现就是"背包里的物品点不开属性弹窗"（身上的装备在 .doll 里不受影响）。
+    // 拖拽改用下面的指针事件实现，不需要 HTML5 拖放。
+    el.removeAttribute("draggable");
   });
 
   root.querySelectorAll<HTMLElement>(".oob-item").forEach((el) => {
     el.addEventListener("click", () => onSelect(Number(el.dataset.item)));
   });
 
-  root.querySelectorAll<HTMLElement>(".grid").forEach((grid) => {
-    const wrap = grid.closest(".grid-wrap") as HTMLElement;
-    const gridKey = wrap?.dataset.grid ?? "";
+  bindPointerDrag(root, items, onMove);
+  void layout;
+}
+
+/** 拖拽阈值（像素）：移动超过它才算拖拽，否则当成点击。 */
+const DRAG_THRESHOLD = 5;
+
+/**
+ * 基于**指针事件**的拖拽（不用 HTML5 拖放）。
+ *
+ * 为什么换掉原生拖放：Tauri 的 WebView2 里 `dragover` / `drop` 不可靠，
+ * 用户反馈"拖拽移动还是不行"。指针事件在所有环境都工作，也更好控制。
+ *
+ * 行为：按下物品块 → 移动超过阈值 → 跟随光标显示一个浮动标签 →
+ * 松开时按落点算出目标格子并调用 `onMove`。落点用**文档坐标**判定，
+ * 因为浮动标签会跟随鼠标，不能用它自己的位置去算。
+ */
+function bindPointerDrag(
+  root: HTMLElement,
+  items: ItemDto[],
+  onMove: (index: number, page: string, col: number, row: number) => void,
+) {
+  let dragging: { index: number; ghost: HTMLElement; startX: number; startY: number } | null = null;
+  /** 标记刚拖过，避免松手后又触发一次 click 打开弹窗。 */
+  let suppressClick = false;
+
+  const finish = (ev: PointerEvent) => {
+    if (!dragging) return;
+    const { index, ghost } = dragging;
+    dragging = null;
+    ghost.remove();
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", finish);
+
+    // 松手位置落在哪个网格的哪一格
+    const target = document.elementFromPoint(ev.clientX, ev.clientY);
+    const grid = target?.closest(".grid") as HTMLElement | null;
+    if (!grid || grid.classList.contains("doll")) return;
+    const wrap = grid.closest(".grid-wrap") as HTMLElement | null;
+    const page = wrap?.dataset.grid ?? "";
     const cols = Number(grid.dataset.cols);
     const rows = Number(grid.dataset.rows);
-    grid.addEventListener("dragover", (ev) => {
-      ev.preventDefault();
-      (ev as DragEvent).dataTransfer!.dropEffect = "move";
-    });
-    grid.addEventListener("drop", (ev) => {
-      ev.preventDefault();
-      const index = Number((ev as DragEvent).dataTransfer?.getData("text/plain"));
+    const rect = grid.getBoundingClientRect();
+    const scale = grid.clientWidth / (cols * CELL) || 1;
+    const col = Math.max(0, Math.min(cols - 1, Math.floor((ev.clientX - rect.left) / (CELL * scale))));
+    const row = Math.max(0, Math.min(rows - 1, Math.floor((ev.clientY - rect.top) / (CELL * scale))));
+    const item = items.find((i) => i.index === index);
+    if (!item) return;
+    if (item.invX === col && item.invY === row && item.storePage === page) return;
+    suppressClick = true;
+    onMove(index, page, col, row);
+  };
+
+  const onPointerMove = (ev: PointerEvent) => {
+    if (!dragging) return;
+    const dx = ev.clientX - dragging.startX;
+    const dy = ev.clientY - dragging.startY;
+    if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    dragging.ghost.style.left = `${ev.clientX + 8}px`;
+    dragging.ghost.style.top = `${ev.clientY + 8}px`;
+  };
+
+  root.querySelectorAll<HTMLElement>(".blk[data-item]").forEach((el) => {
+    // 只有数值网格里的物品能拖；装备页/佣兵的固定槽不给拖
+    const grid = el.closest(".grid") as HTMLElement | null;
+    if (!grid || grid.classList.contains("doll")) return;
+
+    el.addEventListener("pointerdown", (ev) => {
+      if (ev.button !== 0) return; // 只处理左键
+      const index = Number(el.dataset.item);
       if (!Number.isInteger(index)) return;
-      const rect = grid.getBoundingClientRect();
-      const scale = grid.clientWidth / (cols * CELL) || 1;
-      const col = Math.max(0, Math.min(cols - 1, Math.floor((ev.clientX - rect.left) / (CELL * scale))));
-      const row = Math.max(0, Math.min(rows - 1, Math.floor((ev.clientY - rect.top) / (CELL * scale))));
-      const item = items.find((i) => i.index === index);
-      if (!item) return;
-      if (item.invX === col && item.invY === row && item.storePage === gridKey) return;
-      onMove(index, gridKey, col, row);
+      const ghost = document.createElement("div");
+      ghost.className = "drag-ghost";
+      ghost.textContent = el.querySelector(".blk-name")?.textContent ?? `#${index}`;
+      ghost.style.left = `${ev.clientX + 8}px`;
+      ghost.style.top = `${ev.clientY + 8}px`;
+      document.body.appendChild(ghost);
+      dragging = { index, ghost, startX: ev.clientX, startY: ev.clientY };
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", finish, { once: true });
     });
   });
-  void layout;
+
+  // 拖拽松手后紧跟着的 click 要吞掉，否则会同时打开属性弹窗
+  root.addEventListener(
+    "click",
+    (ev) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      ev.stopPropagation();
+      ev.preventDefault();
+    },
+    true,
+  );
 }
