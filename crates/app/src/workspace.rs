@@ -54,6 +54,10 @@ pub struct StatCatalogEntry {
     pub per_level: bool,
     /// 界面输入框的最小变化量（按等级的是 `1/2^op_param`）。
     pub display_step: f64,
+    /// 层（参数）的可选值；界面用它做"值2"的下拉框。
+    ///
+    /// 空表示没有已知的可选集合（界面退化成数字输入框）。
+    pub param_options: Vec<ParamOptionDto>,
 }
 
 /// 编辑器工作区。
@@ -536,8 +540,27 @@ impl Workspace {
         match id {
             // item_addclassskills：层 = 职业行号
             83 => {
-                let mut rows: Vec<(u16, String)> =
-                    classes.iter().map(|(k, v)| (*k, v.clone())).collect();
+                // 只保留真正的职业：表里还有 `Expansion` 这种占位行
+                // （`Code` 列为空），它不是一个可选职业，列出来只会让用户困惑
+                // （用户实际反馈"多了个 expansion"）。
+                let real: Vec<u16> = {
+                    let Some(table) = self.tables.get("PlayerClass") else {
+                        return Vec::new();
+                    };
+                    (0..table.len())
+                        .filter(|row| {
+                            table
+                                .cell_nonempty(*row, "Code")
+                                .map(|c| !c.is_empty())
+                                .unwrap_or(false)
+                        })
+                        .map(|row| row as u16)
+                        .collect()
+                };
+                let mut rows: Vec<(u16, String)> = real
+                    .into_iter()
+                    .filter_map(|row| classes.get(&row).map(|name| (row, name.clone())))
+                    .collect();
                 rows.sort_by_key(|(k, _)| *k);
                 rows.into_iter()
                     .map(|(layer, label)| ParamOptionDto {
@@ -1027,13 +1050,18 @@ impl Workspace {
     /// **默认只返回游戏会显示、且解析出名字的属性**（`all = false`）；
     /// 那批引擎内部记账字段（改了不生效）默认不列。
     /// 传 `all = true` 可以看到全部（界面应标注"可能无效"）。
-    pub fn stat_catalog(&self, all: bool) -> Vec<StatCatalogEntry> {
-        let source = if all {
-            self.stat_namer.named()
+    pub fn stat_catalog(&mut self, all: bool) -> Vec<StatCatalogEntry> {
+        // 先克隆成拥有所有权的列表，释放对 `self.stat_namer` 的借用；
+        // 否则后面没法再借 `self` 去查技能表/职业表（算参数选项要用）。
+        let source: Vec<d2r_data::StatName> = if all {
+            self.stat_namer.named().into_iter().cloned().collect()
         } else {
-            self.stat_namer.editable()
+            self.stat_namer.editable().into_iter().cloned().collect()
         };
-        source
+        // 参数选项要用到技能表/职业表，先算好（闭包里无法再借 self）
+        let skill_names = self.skill_local_names();
+        let class_names = self.class_local_names();
+        let mut entries: Vec<StatCatalogEntry> = source
             .into_iter()
             .map(|s| {
                 // 范围与精度也要给出来：界面要在**用户填值之前**就显示
@@ -1041,7 +1069,12 @@ impl Workspace {
                 let limit = self.stat_limits.get(s.id);
                 StatCatalogEntry {
                     id: s.id,
-                    name: s.display.clone(),
+                    // 带参数位的属性在**目录**里要用通用名，不能用某一个具体值。
+                    // 数据里 `item_addclassskills` 的 `descstrpos` 指向
+                    // `ModStr3a`（亚马逊），直接用就会显示成"亚马逊技能等级"，
+                    // 让用户以为只能加亚马逊（用户反馈过）。
+                    // 具体加哪个由"值2"决定，所以这里显示通用名。
+                    name: catalog_name(s.id, &s.display),
                     internal: s.internal.clone(),
                     step: s.step,
                     has_param_bits: s.has_param_bits,
@@ -1052,9 +1085,24 @@ impl Workspace {
                     range_text: limit.map(|l| l.range_text()),
                     per_level: limit.map(|l| l.per_level).unwrap_or(false),
                     display_step: limit.map(|l| l.user_step()).unwrap_or(1.0),
+                    param_options: Vec::new(),
                 }
             })
-            .collect()
+            .collect();
+        // 参数选项要逐条查表（`param_options_for` 需要 `&mut self`），
+        // 所以先收集完再统一补。只有带参数位的属性才有内容。
+        let ids: Vec<u16> = entries
+            .iter()
+            .filter(|e| e.has_param_bits)
+            .map(|e| e.id)
+            .collect();
+        for id in ids {
+            let options = self.param_options_for(id, &skill_names, &class_names);
+            if let Some(entry) = entries.iter_mut().find(|e| e.id == id) {
+                entry.param_options = options;
+            }
+        }
+        entries
     }
 
     /// 某个属性的名字（查不到时返回 `属性#<id>`）。
@@ -1386,6 +1434,37 @@ fn param_label_from(
             Some(format!("技能「{skill}」+{value}"))
         }
         _ => None,
+    }
+}
+
+/// 属性目录里用的名字（带参数位的属性要换成**通用名**）。
+///
+/// 数据里同一族属性用不同字符串键区分参数值，而 `descstrpos` 只指向**某一个**
+/// 具体值：`item_addclassskills` 指向 `ModStr3a`（亚马逊）。目录里直接用它，
+/// 用户会以为这条属性只能加亚马逊技能（实际由"值2"决定加哪个职业）。
+///
+/// 所以这里把"具体值"替换成通用说法。只有确知含义的属性才换，其余原样返回。
+fn catalog_name(id: u16, display: &str) -> String {
+    match id {
+        // 层 = 职业行号 → 通用名
+        83 => "职业技能等级".to_string(),
+        // item_aura：值 = 光环等级，层 = 光环；通用名去掉"级"与后缀占位
+        151 => "装备时获得光环".to_string(),
+        // 下面几条的模板里含**两个**占位符（技能 + 职业），洗掉占位符后
+        // 只剩下连接词（`'%+d 至%s %s'` → "至"），当名字毫无意义，
+        // 所以给它们固定的可读名。
+        107 => "指定技能等级".to_string(),
+        97 => "非职业技能等级".to_string(),
+        188 => "指定技能页等级".to_string(),
+        195 => "攻击时施放技能".to_string(),
+        196 => "杀死敌人时施放技能".to_string(),
+        197 => "死亡时施放技能".to_string(),
+        198 => "击中时施放技能".to_string(),
+        199 => "升级时施放技能".to_string(),
+        201 => "被击中时施放技能".to_string(),
+        204 => "聚气技能".to_string(),
+        126 => "火焰/冰霜/闪电技能".to_string(),
+        _ => display.to_string(),
     }
 }
 

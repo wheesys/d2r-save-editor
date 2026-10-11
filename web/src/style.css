@@ -85,8 +85,14 @@ input[type="number"], input[type="text"] {
   flex-wrap: wrap;
 }
 .add-stat-label { font-size: 13px; color: var(--muted); }
-.add-stat select { min-width: 260px; }
+/* 属性有 300 多条，搜索框窄一点、给下拉框留出宽度 */
+.add-stat select { min-width: 240px; }
 .add-stat input { width: 110px; }
+#add-stat-search { width: 120px; }
+/* 值2 的控件（下拉框或数字框）跟在值1 后面 */
+#add-stat-value2-slot { display: inline-flex; }
+#add-stat-value2-slot select { min-width: 120px; }
+#add-stat-value2-slot input { width: 90px; }
 .muted { color: var(--muted); font-size: 13px; }
 .hidden { display: none !important; }
 

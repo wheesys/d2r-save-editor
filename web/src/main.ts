@@ -533,6 +533,8 @@ async function addStatNow() {
   const entry = statCatalog.find((s) => s.id === id);
   const name = entry?.name ?? `属性#${id}`;
   const value = Number(rawValue);
+  // 值2（参数）：带参数位的属性才有。含义见 renderAddStatValue2。
+  const layer = readAddStatValue2(id);
 
   // 先按该属性的可表示范围自查，给出**具体到这条属性**的提示
   const problem = statValueProblem(id, value, $("#add-stat-value") as HTMLInputElement);
@@ -544,7 +546,7 @@ async function addStatNow() {
   try {
     // 直接把这条属性应用到物品上（后端会校验并读回比对）
     await call<number>("apply_item_edits", {
-      edits: [{ kind: "setStat", index: selectedItem, stat: id, value }],
+      edits: [{ kind: "setStat", index: selectedItem, stat: id, value, layer }],
       target: selectedTarget,
     });
     toast(`已添加：${name} = ${value}。点「保存」才写入文件。`);
@@ -569,28 +571,101 @@ function showAddStatHint() {
   const entry = statCatalog.find((s) => s.id === id);
   if (!entry) {
     hint.textContent = "";
+    $("#add-stat-value2-slot").innerHTML = "";
     return;
   }
+  // 不同属性的"值2"形态不同（下拉框或数字框），选中就重建
+  renderAddStatValue2(id);
+
   const parts: string[] = [];
   if (entry.minValue !== null && entry.maxValue !== null) {
     parts.push(`有效范围 ${entry.minValue}–${entry.maxValue}`);
   }
-  if (entry.displayStep > 1) parts.push(`按 1/${entry.displayStep} 精度存储`);
-  if (entry.hasParamBits) parts.push("含参数位");
+  if (entry.displayStep > 1) parts.push(`取值须是 ${entry.displayStep} 的倍数`);
+  if (entry.hasParamBits) parts.push("有值2（第二个可改的数）");
   if (!entry.userVisible) parts.push("内部字段（改了可能不生效）");
   hint.textContent = parts.join("｜");
 
-  // 把范围写进输入框，浏览器会拦住越界与非法步长
-  if (entry.minValue !== null) input.min = String(entry.minValue);
-  else input.removeAttribute("min");
-  if (entry.maxValue !== null) input.max = String(entry.maxValue);
-  else input.removeAttribute("max");
-  if (entry.displayStep > 1) input.step = String(entry.displayStep);
-  else input.removeAttribute("step");
+  // 范围与步长写到 data-* 上，由 statValueProblem() 统一校验
+  // （输入框是 type=text，没有原生 min/max/step）
+  input.dataset.min = entry.minValue === null ? "" : String(entry.minValue);
+  input.dataset.max = entry.maxValue === null ? "" : String(entry.maxValue);
+  input.dataset.step = String(entry.displayStep);
   // 默认值取范围内的值，免得一打开就是非法的
   if (entry.minValue !== null && Number(input.value) < entry.minValue) {
     input.value = String(entry.minValue);
   }
+}
+
+/**
+ * 值2（参数）的可选值；空表示该属性没有值2。
+ *
+ * `paramOptions` 由后端给出（如 `item_addclassskills` 列出各职业）。
+ */
+function paramOptionsOf(id: number): { layer: number; label: string }[] {
+  return statCatalog.find((s) => s.id === id)?.paramOptions ?? [];
+}
+
+/**
+ * 根据选中的属性重建"值2"控件。
+ *
+ * - 属性没有值2 → 不显示控件（普通属性只有一个数）；
+ * - 有已知可选值 → 下拉框（直接选"法师"）；
+ * - 没有已知可选值 → 数字输入框（自己填参数值）。
+ */
+function renderAddStatValue2(id: number) {
+  const slot = $("#add-stat-value2-slot");
+  const entry = statCatalog.find((s) => s.id === id);
+  if (!entry?.hasParamBits) {
+    slot.innerHTML = "";
+    return;
+  }
+  const options = paramOptionsOf(id);
+  slot.innerHTML =
+    options.length > 0
+      ? `<select id="add-stat-value2-sel" title="值2（参数）">${options
+          .map((o) => `<option value="${o.layer}">${escapeHtml(o.label)}</option>`)
+          .join("")}</select>`
+      : `<input id="add-stat-value2" type="text" inputmode="numeric" value="0" title="值2（参数）" />`;
+}
+
+/** 读"值2"控件当前的值；没有控件时返回 `undefined`（表示不带参数）。 */
+function readAddStatValue2(id: number) {
+  const entry = statCatalog.find((s) => s.id === id);
+  if (!entry?.hasParamBits) return undefined;
+  const el = document.querySelector<HTMLInputElement | HTMLSelectElement>(
+    "#add-stat-value2-sel, #add-stat-value2",
+  );
+  if (!el) return undefined;
+  const n = Number(el.value);
+  return Number.isNaN(n) ? undefined : n;
+}
+
+/**
+ * 按搜索词重新填满"新增属性"的下拉框。
+ *
+ * 属性有 300 多条，滚动找太费劲。搜索同时匹配**中文名与内部名**
+ * （习惯英文的人也能按 `item_aura` 找）。
+ */
+function fillAddStatOptions() {
+  const sel = $("#add-stat-select") as HTMLSelectElement;
+  const keyword = ($("#add-stat-search") as HTMLInputElement).value.trim().toLowerCase();
+  const matched = statCatalog.filter(
+    (s) =>
+      keyword === "" ||
+      s.name.toLowerCase().includes(keyword) ||
+      s.internal.toLowerCase().includes(keyword),
+  );
+  // 尽量保留当前选择；它被筛掉时退回第一项
+  const previous = sel.value;
+  sel.innerHTML = matched
+    .map(
+      (s) =>
+        `<option value="${s.id}">${escapeHtml(s.name)}（${escapeHtml(s.internal)}）</option>`,
+    )
+    .join("");
+  if (matched.some((s) => String(s.id) === previous)) sel.value = previous;
+  showAddStatHint();
 }
 
 /** 重新读当前物品的明细并刷新弹窗（添加属性后立刻反映到列表里）。 */
@@ -743,10 +818,9 @@ async function applyDetailEdits() {
 async function loadStatCatalog() {
   try {
     statCatalog = await call<StatCatalogEntry[]>("stat_catalog", { all: false });
-    const sel = $("#add-stat-select") as HTMLSelectElement;
-    sel.innerHTML = statCatalog
-      .map((s) => `<option value="${s.id}">${s.name}（${s.internal}${s.step > 1 ? `，步长${s.step}` : ""}）</option>`)
-      .join("");
+    // 下拉框的内容由 fillAddStatOptions() 统一填（它负责搜索过滤），
+    // 这里不要各写一份，否则搜索一改就漏。
+    fillAddStatOptions();
   } catch {
     /* 老后端没有这个命令 */
   }
@@ -1175,6 +1249,8 @@ function bind() {
 
   // 选中的属性要在**添加之前**就告诉他最大/最小值（否则填了才知道超范围）
   $("#add-stat-select").addEventListener("change", showAddStatHint);
+  // 属性有 300 多条：搜索框实时筛选下拉列表（匹配中文名与内部名）
+  $("#add-stat-search").addEventListener("input", fillAddStatOptions);
   $("#add-stat-value").addEventListener("input", showAddStatHint);
   // 属性目录是异步载入的，拿到后补一次提示
   window.setTimeout(() => {

@@ -224,6 +224,8 @@ export interface StatCatalogEntry {
   perLevel: boolean;
   /** 输入框最小变化量 */
   displayStep: number;
+  /** 值2（参数）的可选值；空表示没有已知可选集合 */
+  paramOptions: { layer: number; label: string }[];
 }
 export interface MercenaryItem {
   index: number;

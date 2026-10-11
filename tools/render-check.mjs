@@ -11,6 +11,7 @@
  * 退出码非 0 表示有断言失败。
  */
 
+import { readFileSync } from "node:fs";
 import { buildGrids, renderInventory, setItemIcons } from "../web/src/inventory.ts";
 import { STAT_TABLE_HEAD, renderStatRow } from "../web/src/statrow.ts";
 
@@ -319,6 +320,25 @@ console.log("=== 6. 属性行：值1 必须真的渲染出来 ===");
   // 表头列名：内部名列已去掉，两个值列叫 值1 / 值2
   check("表头是 值1 / 值2", STAT_TABLE_HEAD.includes("<th>值1</th>") && STAT_TABLE_HEAD.includes("<th>值2</th>"));
   check("表头不再有「内部名」列", !STAT_TABLE_HEAD.includes("内部名"));
+}
+
+console.log("=== 7. 新增属性一行：搜索框 + 值2 控件 ===");
+{
+  const js = readFileSync(new URL("../web/src/main.ts", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+  check("有属性搜索框", page.includes('id="add-stat-search"'));
+  check("搜索框已绑定筛选", js.includes('"#add-stat-search"') && js.includes("fillAddStatOptions"));
+  check("有值2 控件容器", page.includes('id="add-stat-value2-slot"'));
+  check(
+    "值2 支持下拉与数字两种形态",
+    js.includes("add-stat-value2-sel") && js.includes('id="add-stat-value2"'),
+  );
+  check("值1 是文本输入（避免 number 的空白渲染）", /id="add-stat-value"[^>]*type="text"/.test(page));
+  // 目录下拉的填充只应有一处（fillAddStatOptions），否则搜索会漏过滤
+  const directFills = [
+    ...js.matchAll(/add-stat-select"\) as HTMLSelectElement;[\s\S]{0,60}?sel\.innerHTML/g),
+  ].length;
+  check("目录下拉只在一处填充（便于搜索统一过滤）", directFills === 0, `仍有 ${directFills} 处直接填充`);
 }
 
 console.log("");

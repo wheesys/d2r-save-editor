@@ -1427,7 +1427,7 @@ fn cmd_skill_trees(args: &[String]) -> ExitCode {
 fn cmd_stats(args: &[String]) -> ExitCode {
     let json = args.iter().any(|a| a == "--json");
     let filter = arg_of(args, "--filter").map(|f| f.to_lowercase());
-    let ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
     let all = args.iter().any(|a| a == "--all");
     let catalog = ws.stat_catalog(all);
     let items: Vec<&d2r_app::StatCatalogEntry> = match &filter {

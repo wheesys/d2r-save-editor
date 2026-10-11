@@ -213,8 +213,12 @@
              看起来像一条多余的残留控件 -->
         <div class="add-stat">
           <span class="add-stat-label">新增属性</span>
+          <!-- 属性有 300 多条，先搜索再选；搜索框留空时下拉列出全部 -->
+          <input id="add-stat-search" type="text" placeholder="搜索属性…" title="按属性名或内部名筛选" />
           <select id="add-stat-select" title="选择要添加的属性"></select>
-          <input id="add-stat-value" type="number" value="1" title="属性值" />
+          <input id="add-stat-value" type="text" inputmode="numeric" value="1" title="值1" />
+          <!-- 值2：带参数位的属性才有。有已知可选值时由脚本换成下拉框 -->
+          <span id="add-stat-value2-slot"></span>
           <button id="btn-add-stat">添加</button>
         </div>
         <!-- 选中属性后立刻显示它的有效范围，免得填了才被拒 -->
