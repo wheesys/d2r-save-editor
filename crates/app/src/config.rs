@@ -12,10 +12,13 @@
 //!
 //! ## 存放位置
 //!
-//! 优先放**可执行文件同级**（绿色版友好，和 WebView2 数据目录的策略一致）；
-//! 那里不可写时退回 `%LOCALAPPDATA%\D2RSaveEditor\`。
+//! 固定放 `%LOCALAPPDATA%\D2RSaveEditor\settings.json`。
 //!
-//! 读失败一律当作"没有配置"处理（返回 `None`），不让配置问题挡住主流程。
+//! **不要放 exe 同级**：一开始为了"绿色版便携"选了那里，结果是开发时每次
+//! `cargo build` 都会重写 `target\debug\`、设置跟着被清掉；更新版本换目录也一样会丢。
+//! 目录不存在会自动创建；读失败一律当作"没有配置"（返回 `None`），不挡住主流程。
+//!
+//! 老版本把设置写在 exe 同级，`load()` 里做了一次迁移（见 [`ConfigStore::legacy_path`]）。
 
 use std::path::{Path, PathBuf};
 
@@ -65,45 +68,52 @@ impl ConfigStore {
 
     /// 解析实际使用的配置文件路径。
     ///
-    /// 优先级：显式路径 → exe 同级 → `%LOCALAPPDATA%\D2RSaveEditor\`。
+    /// 只用一个位置：`%LOCALAPPDATA%\D2RSaveEditor\settings.json`。
+    ///
+    /// **不要放在 exe 同级**。一开始为了"绿色版便携"选了 exe 同级，结果是：
+    /// 开发时每次 `cargo build` 都会重写 `target\debug\`，设置跟着被清掉；
+    /// 将来更新版本换了目录也一样会丢。用户目录才是稳定的地方。
+    /// （唯一例外是显式 `at()` 指定的路径，测试用。）
     pub fn path(&self) -> PathBuf {
         if let Some(p) = &self.explicit {
             return p.clone();
-        }
-        if let Some(dir) = exe_dir() {
-            // 绿色版：放在 exe 旁边。能不能写要等真正写的时候才知道，
-            // 这里先给出首选位置，写失败会退到用户目录。
-            return dir.join(FILE_NAME);
         }
         fallback_dir().join(FILE_NAME)
     }
 
     /// 读取配置；文件不存在或内容坏了都返回 `None`。
+    ///
+    /// 顺带做一次**旧位置迁移**：曾经把设置写在 exe 同级，
+    /// 那里还有文件而用户目录没有时读它并搬过来，免得老用户升级后设置"消失"。
     pub fn load(&self) -> Option<Settings> {
-        let text = std::fs::read_to_string(self.path()).ok()?;
+        let text = match std::fs::read_to_string(self.path()) {
+            Ok(t) => t,
+            Err(_) => {
+                let legacy = self.legacy_path()?;
+                let t = std::fs::read_to_string(&legacy).ok()?;
+                // 搬过来（写失败也无所谓，至少这次读到了）
+                let _ = write_atomic(&self.path(), &t);
+                t
+            }
+        };
         serde_json::from_str(&text).ok()
     }
 
     /// 写入配置，返回实际写入的路径。
-    ///
-    /// 首选位置写不进去（只读目录、权限不足）时自动退到 `%LOCALAPPDATA%`。
     pub fn save(&self, settings: &Settings) -> std::io::Result<PathBuf> {
         let json = serde_json::to_string_pretty(settings)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let path = self.path();
+        write_atomic(&path, &json)?;
+        Ok(path)
+    }
 
-        let primary = self.path();
-        match write_atomic(&primary, &json) {
-            Ok(()) => return Ok(primary),
-            Err(e) => {
-                // 显式指定的路径写不进去就直接报错，不要偷偷换地方
-                if self.explicit.is_some() {
-                    return Err(e);
-                }
-            }
+    /// 旧位置（exe 同级）的配置文件，仅用于迁移。
+    fn legacy_path(&self) -> Option<PathBuf> {
+        if self.explicit.is_some() {
+            return None;
         }
-        let fallback = fallback_dir().join(FILE_NAME);
-        write_atomic(&fallback, &json)?;
-        Ok(fallback)
+        exe_dir().map(|d| d.join(FILE_NAME))
     }
 }
 
@@ -115,7 +125,7 @@ fn exe_dir() -> Option<PathBuf> {
         .map(Path::to_path_buf)
 }
 
-/// 备选目录：`%LOCALAPPDATA%\D2RSaveEditor`（非 Windows 用当前目录下的同名子目录）。
+/// 配置目录：`%LOCALAPPDATA%\D2RSaveEditor`（非 Windows 用临时目录下的同名子目录）。
 fn fallback_dir() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)

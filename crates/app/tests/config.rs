@@ -77,6 +77,34 @@ fn default_path_is_a_json_file() {
     );
 }
 
+/// **回归**：默认配置路径不能放在 exe 同级。
+///
+/// 曾经为了"绿色版便携"放在 exe 旁边，结果开发时每次 `cargo build` 都会重写
+/// `target\debug\`、设置跟着被清掉（用户实际遇到："保存了尺寸，重开又没了"）。
+/// 现在固定放用户配置目录。
+#[test]
+fn default_path_is_not_next_to_exe() {
+    let p = ConfigStore::new().path();
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(|d| d.to_path_buf()))
+    {
+        assert!(
+            !p.starts_with(&dir),
+            "配置不能放 exe 同级（rebuild 会清掉）：{} 落在 {} 下",
+            p.display(),
+            dir.display()
+        );
+    }
+    let dir = p.parent().expect("应有父目录");
+    assert_eq!(
+        dir.file_name().and_then(|s| s.to_str()),
+        Some("D2RSaveEditor"),
+        "配置目录名应为 D2RSaveEditor，实际 {}",
+        dir.display()
+    );
+}
+
 /// 最近打开的路径要能存下来（跨重启），顺序是"最新在最前"。
 #[test]
 fn recent_paths_roundtrip_and_order() {
