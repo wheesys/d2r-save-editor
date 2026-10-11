@@ -182,19 +182,17 @@ export interface ItemStatDto {
   step: number;
   hasParamBits: boolean;
   userVisible: boolean;
-  /** 可表示的最小值（逐条属性各不相同；查不到规格时为 null） */
+  /** 可表示的最小值（用户可见值） */
   minValue: number | null;
-  /** 可表示的最大值 */
+  /** 可表示的最大值（用户可见值） */
   maxValue: number | null;
-  /** 范围的可读文本，如 `0–130816（步长 256）` */
+  /** 范围的可读文本，如 `0–127`、`1–511` */
   rangeText: string | null;
-  /** 是否"按等级加成"（*perlevel 属性，存的是每级的值） */
+  /** 是否"按等级加成"（*perlevel 属性，数值部分是系数） */
   perLevel: boolean;
-  /** 按等级加成时，该物品等级下的合计（与 displayValue 同单位） */
-  effectiveValue: number | null;
-  /** 给用户看的整数值（已按存储精度换算，与游戏里一致） */
+  /** 给用户看的值：按等级的是"每级加多少"（可为小数，如 7.875），否则是整数 */
   displayValue: number;
-  /** 存储精度（2^ValShift），无移位时为 1 */
+  /** 输入框最小变化量（按等级的是 1/2^op_param，生命为 0.125） */
   displayStep: number;
   /** 带参数属性的参数含义（如"获得 5 级「Holy Shock」光环"）；解不出时为 null */
   paramLabel: string | null;
@@ -214,11 +212,13 @@ export interface StatCatalogEntry {
   hasParamBits: boolean;
   userVisible: boolean;
   descTemplate: string | null;
-  /** 可选范围（游戏显示值） */
+  /** 可选范围（用户可见值） */
   minValue: number | null;
   maxValue: number | null;
   rangeText: string | null;
-  /** 存储精度（2^ValShift） */
+  /** 是否按等级加成（数值部分是系数，界面显示每级多少） */
+  perLevel: boolean;
+  /** 输入框最小变化量 */
   displayStep: number;
 }
 export interface MercenaryItem {

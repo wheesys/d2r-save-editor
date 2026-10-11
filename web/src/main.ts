@@ -472,14 +472,10 @@ function renderItemDetail(detail: ItemDetailDto) {
       // 逐条属性各有自己的有效范围（来自 ItemStatCost 的位宽/偏移/移位），
       // 直接显示出来并作为输入框的上下限，用户就不会填到会被截断的值。
       const parts: string[] = [];
-      // 「按等级加成」要放最前：这类属性存的是**每级**的值，
-      // 不说明的话会被当成总值（用户提过这个）。
+      // 按等级加成：只显示"每级加多少"，不显示合计（用户明确要求）。
+      // 数值部分是系数，`displayValue` 已经是"每级"的量（可能是小数，如 7.875）。
       if (s.perLevel) {
-        parts.push(
-          s.effectiveValue !== null
-            ? `每级 +${s.displayValue}（等级 ${it.level} → 合计 ${s.effectiveValue}）`
-            : `每级 +${s.displayValue}`,
-        );
+        parts.push(`每级 +${s.displayValue}`);
       }
       if (s.rangeText) parts.push(`有效范围 ${s.rangeText}`);
       // 带参数属性的参数含义（如"获得 5 级「Holy Shock」光环"）

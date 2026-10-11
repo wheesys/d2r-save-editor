@@ -27,7 +27,7 @@ pub struct SaveOutcome {
 }
 
 /// 属性目录条目（界面做"添加属性"下拉用）。
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatCatalogEntry {
     /// 属性 ID。
@@ -44,14 +44,16 @@ pub struct StatCatalogEntry {
     pub user_visible: bool,
     /// 描述串模板（洗格式串前的原文，仅供参考）。
     pub desc_template: Option<String>,
-    /// 可表示的**最小值（游戏显示值）**。
-    pub min_value: Option<i64>,
-    /// 可表示的**最大值（游戏显示值）**。
-    pub max_value: Option<i64>,
-    /// 范围的可读文本（显示值单位）。
+    /// 可表示的**最小值（用户可见值）**。
+    pub min_value: Option<f64>,
+    /// 可表示的**最大值（用户可见值）**。
+    pub max_value: Option<f64>,
+    /// 范围的可读文本（用户可见值单位）。
     pub range_text: Option<String>,
-    /// 存储精度（`2^ValShift`），1 表示无移位。
-    pub display_step: i64,
+    /// 是否按等级加成（数值部分是系数，界面显示"每级加多少"）。
+    pub per_level: bool,
+    /// 界面输入框的最小变化量（按等级的是 `1/2^op_param`）。
+    pub display_step: f64,
 }
 
 /// 编辑器工作区。
@@ -799,8 +801,6 @@ impl Workspace {
         index: usize,
     ) -> Result<ItemDetailDto, AppError> {
         let detail = { self.session()?.item_detail_on(target, index)? };
-        // 按等级加成的属性依据的是**角色等级**（ItemStatCost 的 op base = level）
-        let character_level = i64::from(self.session()?.file.save.character.level);
         let size_map = crate::bundle::item_size_map();
         let mut namer = ItemNamer::new(&self.strings, &mut self.tables, self.lang.clone());
         let n = namer.resolve(&detail.code, &detail.quality, detail.quality_index);
@@ -818,20 +818,15 @@ impl Workspace {
                 // 界面要把它显示出来，用户才知道能填多少。
                 let limit = self.stat_limits.get(*id);
                 // 按等级加成的属性（*perlevel）存的是**系数**，不是直接加成：
-                // 游戏按 `值 / 2^op_param × 角色等级` 算（见 StatLimit::per_level_total）。
+                // 界面显示"每级加多少" = 系数 / 2^op_param（生命 63/8 = 7.875）。
                 let per_level = limit.map(|l| l.per_level).unwrap_or(false);
-                // 换算成**游戏里显示的值**（内部做掉，用户不需要知道）：
-                // 生命/法力 按 1/256 精度存，所以要除以 256。
-                let display = limit.map(|l| l.to_display(*value)).unwrap_or(*value);
-                // 范围也要用显示值，否则会显示成内部数
+                // 用户可见值：按等级的是每级加成（可能小数），否则是换算后的整数
+                let display = limit.map(|l| l.to_user(*value)).unwrap_or(*value as f64);
+                // 范围也要用同一口径，否则会显示成内部数
                 let (min_value, max_value) = match limit {
-                    Some(l) => (Some(l.to_display(l.min())), Some(l.to_display(l.max()))),
+                    Some(l) => (Some(l.to_user(l.min())), Some(l.to_user(l.max()))),
                     None => (None, None),
                 };
-                // 实际加成依据的是**角色等级**（数据里 op base = level），不是物品等级
-                let effective_value = limit
-                    .filter(|l| l.per_level)
-                    .map(|l| l.per_level_total(display, character_level));
                 ItemStatDto {
                     id: *id,
                     layer: *layer,
@@ -845,9 +840,8 @@ impl Workspace {
                     max_value,
                     range_text: limit.map(|l| l.range_text()),
                     per_level,
-                    effective_value,
                     display_value: display,
-                    display_step: limit.map(|l| l.step()).unwrap_or(1),
+                    display_step: limit.map(|l| l.user_step()).unwrap_or(1.0),
                     param_label: self.param_label(*id, *value, *layer),
                 }
             })
@@ -964,10 +958,11 @@ impl Workspace {
                     has_param_bits: s.has_param_bits,
                     user_visible: s.user_visible,
                     desc_template: s.desc_template.clone(),
-                    min_value: limit.map(|l| l.to_display(l.min())),
-                    max_value: limit.map(|l| l.to_display(l.max())),
+                    min_value: limit.map(|l| l.to_user(l.min())),
+                    max_value: limit.map(|l| l.to_user(l.max())),
                     range_text: limit.map(|l| l.range_text()),
-                    display_step: limit.map(|l| l.step()).unwrap_or(1),
+                    per_level: limit.map(|l| l.per_level).unwrap_or(false),
+                    display_step: limit.map(|l| l.user_step()).unwrap_or(1.0),
                 }
             })
             .collect()
@@ -1036,13 +1031,14 @@ impl Workspace {
                 ItemEdit::SetStat { index, stat, value } => ItemEdit::SetStat {
                     index: *index,
                     stat: *stat,
-                    value: self.stat_limits.display_to_raw(*stat, *value),
+                    // 界面给的是用户可见值（按等级的是每级小数），换算回存档整数
+                    value: self.stat_limits.display_to_raw(*stat, *value as f64),
                 },
                 ItemEdit::ReplaceStats { index, stats } => ItemEdit::ReplaceStats {
                     index: *index,
                     stats: stats
                         .iter()
-                        .map(|(s, v, l)| (*s, self.stat_limits.display_to_raw(*s, *v), *l))
+                        .map(|(s, v, l)| (*s, self.stat_limits.display_to_raw(*s, *v as f64), *l))
                         .collect(),
                 },
                 other => other.clone(),

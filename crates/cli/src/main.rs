@@ -1324,26 +1324,26 @@ fn cmd_item(args: &[String]) -> ExitCode {
         "ID", "层", "名称", "内部名", "值"
     );
     for s in &detail.stats {
+        // 值列显示**用户可见值**（按等级的是每级小数，如 7.875）
+        let display_text = d2r_data::statlimit::format_rate(s.display_value);
         // 「按等级」要写在最前面：这类属性存的是**每级**的值，
         // 不说明的话 61 会被当成总值。
         let mut notes: Vec<String> = Vec::new();
         if s.per_level {
-            // 官方公式：值 / 2^op_param × 角色等级（数据里 op base = level）。
-            // 所以这里给的是**按角色等级算出的实际加成**，不是"每级 X"。
-            notes.push(match s.effective_value {
-                Some(total) if total != 0 => format!(
-                    "按角色等级加成（系数 {}，当前实际 +{}）",
-                    s.display_value, total
-                ),
-                Some(_) => "按角色等级加成，当前角色等级下为 0".to_string(),
-                None => format!("按角色等级加成（系数 {}）", s.display_value),
-            });
+            // 只给"每级加多少"（用户明确要求不用管一共加了多少）
+            notes.push(format!(
+                "每级 +{}",
+                d2r_data::statlimit::format_rate(s.display_value)
+            ));
         }
         if !s.user_visible {
             notes.push("内部字段（可能不生效）".into());
         }
-        if s.display_step > 1 {
-            notes.push(format!("按 1/{} 精度存储", s.display_step));
+        // 存储精度提示：只有"存储精度 < 显示精度"时才需要说明
+        // （例如生命按 1/256 精度存，显示值是整数；按等级加成的每级小数
+        // 本身就体现了精度，不必再提）
+        if !s.per_level && s.display_step < 1.0 {
+            notes.push(format!("按 1/{:.0} 精度存储", 1.0 / s.display_step));
         }
         // 参数含义（如"获得 31 级「狂热」光环"）——比"含参数"有用得多
         if let Some(pl) = &s.param_label {
@@ -1357,7 +1357,7 @@ fn cmd_item(args: &[String]) -> ExitCode {
             s.layer,
             s.name,
             s.internal,
-            s.display_value,
+            display_text,
             notes.join("｜")
         );
     }

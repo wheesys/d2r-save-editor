@@ -17,6 +17,20 @@ use std::collections::BTreeMap;
 use crate::dataset::TableStore;
 use crate::table::Table;
 
+/// 把每级加成格式化成给用户看的文本。
+///
+/// 是整数就不带小数点（`8` 而不是 `8.000`），否则保留必要位数
+/// （生命每级是 `7.875`，砍成 `7.88` 会让人对不上游戏里的数）。
+pub fn format_rate(rate: f64) -> String {
+    if rate.fract() == 0.0 {
+        format!("{}", rate as i64)
+    } else {
+        // 去掉末尾多余的 0，同时保留足够精度
+        let s = format!("{rate:.3}");
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
 /// 一个属性的取值上限。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatLimit {
@@ -136,17 +150,58 @@ impl StatLimit {
         format!("{}–{}", self.display_min(), self.display_max())
     }
 
-    /// 按等级加成属性的**实际加成**（游戏里显示的那个数）。
+    /// 按等级加成属性的**每级实际加成**（游戏里"每级 +X"的那个 X）。
     ///
     /// 官方公式（`ItemStatCost.txt` 的 `op` / `op param` / `op base`）：
-    /// `实际加成 = 值 × 角色等级 / 2^op_param`，本表 `op base` 都是 `level`
-    /// （**角色等级**，不是物品等级）。
+    /// `实际加成 = 值 × 角色等级 / 2^op_param`，所以
+    /// **每级加成 = 值 / 2^op_param**（`op param` 就是"每级 1 点需要多少值"的指数）。
     ///
-    /// 顺序很关键：**先乘后除**。先整除（`63/8=7`）再乘会得到 357，
-    /// 而正确结果是 `63 × 52 / 8 = 409.5 → 409`，与游戏里"生命加了 409"一致。
-    pub fn per_level_total(&self, value: i64, character_level: i64) -> i64 {
-        let divisor = 1i64 << self.op_param.min(62);
-        value.saturating_mul(character_level) / divisor
+    /// 用 `f64` 是因为结果可能不是整数：生命 `item_hp_perlevel` 的系数是 63、
+    /// `op param` 是 3，所以每级是 `63/8 = 7.875`。界面直接显示这个数，
+    /// **不要再乘角色等级**（用户明确要求只看每级多少）。
+    pub fn per_level_rate(&self, value: i64) -> f64 {
+        let divisor = (1i64 << self.op_param.min(62)) as f64;
+        value as f64 / divisor
+    }
+
+    /// 界面上的值 → 存档里的整数。
+    ///
+    /// 界面显示的是**游戏里的那个数**，存档里存的是整数：
+    /// - 按等级加成的属性：界面是"每级加多少"（`7.875`），存档是系数（`63`），
+    ///   乘 `2^op_param`（`7.875 × 8 = 63`）。用户明确要求：
+    ///   "编辑器展示给用户看的时候可以 7.875，然后保存到存档文件里面整对就行"。
+    /// - 移位类（生命/法力）：界面是 63，存档是 16128，乘回精度即可。
+    ///
+    /// **两者可能同时存在**：`item_hp_perlevel` 既按等级加成、又带
+    /// `ValShift=8`，除数是 `2^op_param × 2^ValShift`（8 × 256 = 2048）。
+    /// 只算其中一个会把 16128 显示成 2016（踩过）。
+    pub fn to_stored(&self, display: f64) -> i64 {
+        (display * self.user_divisor() as f64).round() as i64
+    }
+
+    /// 存档里的值 → 界面上的数（按等级加成的会是小数，如 `7.875`）。
+    pub fn to_user(&self, stored: i64) -> f64 {
+        stored as f64 / self.user_divisor() as f64
+    }
+
+    /// 界面值与存档值之间的总除数（`2^op_param × 2^ValShift`）。
+    ///
+    /// 按等级加成与移位是**两个独立因子**，可能同时存在，所以要相乘。
+    pub fn user_divisor(&self) -> i64 {
+        let op = 1i64 << self.op_param.min(62);
+        op.saturating_mul(self.step())
+    }
+
+    /// 界面输入框的最小变化量（`step`）。
+    ///
+    /// 按等级加成的属性：每级 1 点需要 `2^op_param` 点值，
+    /// 所以界面上最小变化是 `1 / 2^op_param`（生命是 `0.125`）。
+    pub fn user_step(&self) -> f64 {
+        if self.per_level {
+            1.0 / (1i64 << self.op_param.min(62)) as f64
+        } else {
+            1.0
+        }
     }
 
     /// 把**存档里的值**换算成**游戏里显示的值**。
@@ -164,15 +219,6 @@ impl StatLimit {
             raw / self.step()
         } else {
             raw
-        }
-    }
-
-    /// [`Self::to_display`] 的逆运算：把用户填的**游戏值**还原成存档里的值。
-    pub fn to_raw(&self, display: i64) -> i64 {
-        if self.val_shift > 0 {
-            display * self.step()
-        } else {
-            display
         }
     }
 }
@@ -311,15 +357,14 @@ impl StatLimits {
         Ok(())
     }
 
-    /// 把界面提交的**游戏显示值**换算回存档里的**原始值**。
+    /// 把界面提交的**用户可见值**换算回**存档里的整数**。
     ///
-    /// 界面显示与输入都用游戏值（生命 63、跑速 30），所以真正落盘前
-    /// 必须换回原始值（生命 16128、跑速 50）。**这层换算完全在内部完成**，
-    /// 用户不需要知道。
-    pub fn display_to_raw(&self, id: u16, display: i64) -> i64 {
+    /// 按等级加成的属性，界面是"每级加多少"（`7.875`），存档是系数（`63`）；
+    /// 移位类界面是 63、存档是 16128。**换算完全在内部完成。**
+    pub fn display_to_raw(&self, id: u16, display: f64) -> i64 {
         match self.get(id) {
-            Some(l) => l.to_raw(display),
-            None => display,
+            Some(l) => l.to_stored(display),
+            None => display.round() as i64,
         }
     }
 
@@ -453,7 +498,8 @@ mod tests {
         // 生命：ValShift 8 → 存档 16128 在游戏里是 63
         let hp = limit(7, 9, 32, 8);
         assert_eq!(hp.to_display(16128), 63);
-        assert_eq!(hp.to_raw(63), 16128);
+        assert_eq!(hp.to_stored(63.0), 16128);
+        assert_eq!(hp.user_divisor(), 256, "只有移位，没有按等级加成");
         // 显示范围是 1..511（9 位字段满值），不是 256..122624
         assert_eq!(hp.display_min(), 1, "0 会被写侧跳过");
         assert_eq!(hp.display_max(), 511);
@@ -469,7 +515,8 @@ mod tests {
         // 位字段的内部偏移，不能当成显示偏移去减（否则 127 会变成 107）。
         let frw = limit(96, 7, 20, 0);
         assert_eq!(frw.to_display(30), 30, "存档 30 就是游戏 30");
-        assert_eq!(frw.to_raw(30), 30);
+        assert_eq!(frw.to_stored(30.0), 30);
+        assert_eq!(frw.user_divisor(), 1);
         assert_eq!(frw.display_min(), 0);
         assert_eq!(frw.display_max(), 127, "用户看到的满值是 127");
         assert_eq!(frw.range_text(), "0–127");
@@ -501,7 +548,7 @@ mod tests {
         assert!(limits.advise(83, 3).unwrap().contains("参数位"));
     }
 
-    /// 按等级加成属性的实际加成：`值 × 角色等级 / 2^op_param`。
+    /// 按等级加成属性的**每级**加成：`值 / 2^op_param`。
     ///
     /// 官方来源：`ItemStatCost.txt` 的 `op` / `op param` / `op base`，
     /// 公式见 Phrozen Keep 的说明（`2^op param` = 每级 1 点需要多少值，
@@ -515,21 +562,37 @@ mod tests {
         hp.per_level = true;
         hp.op_param = 3; // 除以 8
 
-        // 用户实测：52 级角色，这件物品的生命加成是 409
-        assert_eq!(hp.per_level_total(63, 52), 409, "63×52/8 = 409.5 → 409");
-        assert_eq!(
-            hp.per_level_total(63, 52),
-            63 * 52 / 8,
-            "必须先乘后除；先整除会得到 357"
-        );
+        // 用户实测：52 级角色，这件装备的生命加成是 409（= 7.875×52）。
+        // 界面只显示每级多少，所以这里断言"每级"。
+        assert_eq!(hp.per_level_rate(63), 7.875, "63/8");
+        assert_eq!(format_rate(hp.per_level_rate(63)), "7.875");
+        // 与用户实测的合计对得上：7.875 × 52 = 409.5 → 409
+        assert_eq!((hp.per_level_rate(63) * 52.0) as i64, 409);
 
-        // 命中类属性是 op param = 1（除以 2）
+        // 力量系数 61 → 每级 7.625；61 × 52 / 8 = 396.5 → 396（用户实测 396）
+        let mut strl = limit(220, 6, 0, 0);
+        strl.per_level = true;
+        strl.op_param = 3;
+        assert_eq!(format_rate(strl.per_level_rate(61)), "7.625");
+        assert_eq!((strl.per_level_rate(61) * 52.0) as i64, 396);
+
+        // **同时带移位与按等级加成**（item_hp_perlevel：op param 3 + ValShift 8）
+        // 除数是 8 × 256 = 2048；只算一个会把 16128 显示成 2016（踩过）。
+        let mut hpl = limit(216, 6, 0, 8);
+        hpl.per_level = true;
+        hpl.op_param = 3;
+        assert_eq!(hpl.user_divisor(), 2048, "8 × 256");
+        assert_eq!(hpl.to_user(16128), 7.875, "16128 / 2048");
+        assert_eq!(hpl.to_stored(7.875), 16128, "存回整数 16128");
+        assert_eq!(format_rate(hpl.to_user(16128)), "7.875");
+        // 界面步长是 1/8 = 0.125（填 7.875 → 存 63）
+        assert!((hpl.user_step() - 0.125).abs() < 1e-9);
+
+        // 命中类属性是 op param = 1（每级 1 点需要 2 点值）
         let mut ar = limit(224, 6, 0, 0); // item_tohit_perlevel
         ar.per_level = true;
         ar.op_param = 1;
-        assert_eq!(ar.per_level_total(10, 50), 250, "10×50/2");
-
-        // 等级为 0 时实际加成为 0
-        assert_eq!(hp.per_level_total(63, 0), 0);
+        assert_eq!(ar.per_level_rate(10), 5.0, "10/2");
+        assert_eq!(format_rate(ar.per_level_rate(10)), "5", "整数不带小数点");
     }
 }
