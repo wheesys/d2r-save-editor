@@ -818,13 +818,18 @@ impl Workspace {
                 // 界面要把它显示出来，用户才知道能填多少。
                 let limit = self.stat_limits.get(*id);
                 // 按等级加成的属性（*perlevel）存的是**系数**，不是直接加成：
-                // 界面显示"每级加多少" = 系数 / 2^op_param（生命 63/8 = 7.875）。
+                // 界面显示"每级加多少" = 字段值 / 2^op_param（生命 63/8 = 7.875）。
                 let per_level = limit.map(|l| l.per_level).unwrap_or(false);
-                // 用户可见值：按等级的是每级加成（可能小数），否则是换算后的整数
-                let display = limit.map(|l| l.to_user(*value)).unwrap_or(*value as f64);
-                // 范围也要用同一口径，否则会显示成内部数
+                // 用户可见值：按等级的是每级加成（可能是小数），否则就是字段值
+                let display = limit
+                    .map(|l| l.display_value(*value))
+                    .unwrap_or(*value as f64);
+                // 范围也用同一口径（按等级的是"每级"区间）
                 let (min_value, max_value) = match limit {
-                    Some(l) => (Some(l.to_user(l.min())), Some(l.to_user(l.max()))),
+                    Some(l) => {
+                        let (lo, hi) = l.display_range();
+                        (Some(lo), Some(hi))
+                    }
                     None => (None, None),
                 };
                 ItemStatDto {

@@ -109,26 +109,6 @@ impl StatLimit {
         self.raw_max() << self.val_shift
     }
 
-    /// 显示值的下限（**不小于 0**）。
-    ///
-    /// 字段本身的下界可能是负的（`Save Add` 造成的内部偏移），但游戏不会给
-    /// 装备显示"负的跑速加成"，所以显示范围从 0 起。
-    pub fn display_min(&self) -> i64 {
-        self.to_display(self.min()).max(0)
-    }
-
-    /// 显示值的上限：**字段满值**。
-    ///
-    /// 无移位时就是 `2^bits - 1`（7 位 → 127，用户看到的满值就是 127，
-    /// 所以**不能**再去减 `Save Add`，否则 127 会变成 107）。
-    /// 有移位时按同样口径：9 位字段满值 511（生命按 1/256 精度，显示即 511）。
-    pub fn display_max(&self) -> i64 {
-        if self.save_bits >= 62 {
-            return i64::MAX;
-        }
-        (1i64 << self.save_bits) - 1
-    }
-
     /// 值是否可表示（范围对 + 落在步长上）。
     pub fn accepts(&self, value: i64) -> bool {
         value >= self.min() && value <= self.max() && value % self.step() == 0
@@ -147,7 +127,8 @@ impl StatLimit {
     /// 用的是**游戏里显示的值**（已换算），不是存档里的原始数——
     /// 用户不该看到 -27 这种内部值。
     pub fn range_text(&self) -> String {
-        format!("{}–{}", self.display_min(), self.display_max())
+        let (lo, hi) = self.display_range();
+        format!("{}–{}", format_rate(lo), format_rate(hi))
     }
 
     /// 按等级加成属性的**每级实际加成**（游戏里"每级 +X"的那个 X）。
@@ -164,32 +145,34 @@ impl StatLimit {
         value as f64 / divisor
     }
 
-    /// 界面上的值 → 存档里的整数。
+    /// 界面上的值（**位字段原值**）→ `d2s` 期望的存储值。
     ///
-    /// 界面显示的是**游戏里的那个数**，存档里存的是整数：
-    /// - 按等级加成的属性：界面是"每级加多少"（`7.875`），存档是系数（`63`），
-    ///   乘 `2^op_param`（`7.875 × 8 = 63`）。用户明确要求：
-    ///   "编辑器展示给用户看的时候可以 7.875，然后保存到存档文件里面整对就行"。
-    /// - 移位类（生命/法力）：界面是 63，存档是 16128，乘回精度即可。
-    ///
-    /// **两者可能同时存在**：`item_hp_perlevel` 既按等级加成、又带
-    /// `ValShift=8`，除数是 `2^op_param × 2^ValShift`（8 × 256 = 2048）。
-    /// 只算其中一个会把 16128 显示成 2016（踩过）。
+    /// `d2s` 的编码是 `value = (field - SaveAdd) << ValShift`，直接照这个来。
+    /// 顺序不能换：`(field << vs) - add` 在 `SaveAdd` 非零时会算错
+    /// （`maxhp` 字段 798 会得到 204256 而不是 196096，用穷举验过）。
     pub fn to_stored(&self, display: f64) -> i64 {
-        (display * self.user_divisor() as f64).round() as i64
+        let field = display.round() as i64;
+        (field - self.save_add as i64) << self.val_shift.min(62)
     }
 
-    /// 存档里的值 → 界面上的数（按等级加成的会是小数，如 `7.875`）。
-    pub fn to_user(&self, stored: i64) -> f64 {
-        stored as f64 / self.user_divisor() as f64
-    }
-
-    /// 界面值与存档值之间的总除数（`2^op_param × 2^ValShift`）。
+    /// `d2s` 的存储值 → 界面上显示的**位字段原值**。
     ///
-    /// 按等级加成与移位是**两个独立因子**，可能同时存在，所以要相乘。
-    pub fn user_divisor(&self) -> i64 {
-        let op = 1i64 << self.op_param.min(62);
-        op.saturating_mul(self.step())
+    /// `d2s` 解码是 `field = (value >> ValShift) + SaveAdd`，照这个来。
+    ///
+    /// ## 为什么游戏显示的是字段值
+    ///
+    /// 验证（`crates/cli/src/bin/fieldcheck.rs`）：全部 263 条属性的实测取值
+    /// 按这个假设算出的字段都放得进位宽，没有一条超宽；区间也与用户在游戏里
+    /// 看到的对上：
+    /// - `item_maxhp_percent`（6 位）→ 用户说范围 **0–63**，
+    ///   而把字段再减 `SaveAdd` 会得到 -10..53（那个负数就是假的）；
+    /// - `item_fastermovevelocity`（7 位）→ 用户说最大 **127**，
+    ///   减 `SaveAdd` 会变成 107。
+    ///
+    /// 即 `SaveAdd` 是**位字段的内部偏置**，游戏界面显示的是加回偏置后的字段值，
+    /// 修改器也要这样做才和游戏里一致。
+    pub fn to_user(&self, stored: i64) -> f64 {
+        ((stored >> self.val_shift.min(62)) + self.save_add as i64) as f64
     }
 
     /// 界面输入框的最小变化量（`step`）。
@@ -202,6 +185,43 @@ impl StatLimit {
         } else {
             1.0
         }
+    }
+
+    /// 界面上给用户看的数。
+    ///
+    /// - 按等级加成的属性（`*perlevel`）：**每级加多少** = 字段值 / `2^op_param`
+    ///   （生命字段 63、`op param` 3 → `7.875`）。用户明确要求只显示每级多少。
+    /// - 其它属性：就是**字段值**本身（`item_maxhp_percent` 显示 31 之类）。
+    pub fn display_value(&self, stored: i64) -> f64 {
+        let field = self.to_user(stored);
+        if self.per_level {
+            field / (1i64 << self.op_param.min(62)) as f64
+        } else {
+            field
+        }
+    }
+
+    /// [`Self::display_value`] 的逆运算：把界面上填的数换回 `d2s` 的存储形态。
+    pub fn stored_from_display(&self, display: f64) -> i64 {
+        let field = if self.per_level {
+            display * (1i64 << self.op_param.min(62)) as f64
+        } else {
+            display
+        };
+        self.to_stored(field)
+    }
+
+    /// 界面上的有效范围（与 [`Self::display_value`] 同单位）。
+    pub fn display_range(&self) -> (f64, f64) {
+        let divisor = if self.per_level {
+            (1i64 << self.op_param.min(62)) as f64
+        } else {
+            1.0
+        };
+        (
+            self.to_user(self.min()) / divisor,
+            self.to_user(self.max()) / divisor,
+        )
     }
 
     /// 把**存档里的值**换算成**游戏里显示的值**。
@@ -363,7 +383,7 @@ impl StatLimits {
     /// 移位类界面是 63、存档是 16128。**换算完全在内部完成。**
     pub fn display_to_raw(&self, id: u16, display: f64) -> i64 {
         match self.get(id) {
-            Some(l) => l.to_stored(display),
+            Some(l) => l.stored_from_display(display),
             None => display.round() as i64,
         }
     }
@@ -489,47 +509,74 @@ mod tests {
         assert!(limits.check(9999, i64::MAX).is_ok());
     }
 
+    /// 显示值 = **存档位字段的原值**（游戏里显示的就是它）。
+    ///
+    /// 用户要求"修改器展示的和游戏内一致"。验证见
+    /// `crates/cli/src/bin/fieldcheck.rs`：全部 263 条属性的实测取值按这个
+    /// 假设都能落进位宽，且区间与用户在游戏里看到的吻合
+    /// （`item_maxhp_percent` → 0–63、`item_fastermovevelocity` → 最大 127）。
+    #[test]
+    fn display_is_the_raw_field_value() {
+        // item_maxhp_percent：6 位、SaveAdd 10 → d2s 给的 31 对应字段 41
+        let hpp = limit(76, 6, 10, 0);
+        assert_eq!(hpp.to_user(31), 41.0, "字段 = d2s值 + SaveAdd");
+        assert_eq!(hpp.to_stored(41.0), 31, "存回 d2s 形态");
+        assert_eq!(hpp.display_range().1, 63.0, "6 位满值 63");
+
+        // item_allskills：SaveAdd 0 → 字段值就是 d2s 值
+        let sk = limit(127, 3, 0, 0);
+        assert_eq!(sk.to_user(7), 7.0);
+        assert_eq!(sk.range_text(), "0–7");
+
+        // item_fastermovevelocity：7 位、SaveAdd 20 → 字段上限 127
+        let frw = limit(96, 7, 20, 0);
+        assert_eq!(frw.to_user(30), 50.0);
+        assert_eq!(frw.to_stored(50.0), 30);
+        assert_eq!(frw.display_range().1, 127.0);
+    }
+
+    /// 按等级加成：界面只给"每级加多少" = 字段值 / 2^op_param。
+    #[test]
+    fn display_value_for_per_level_stats() {
+        // 无位移：字段 61、op param 3 → 每级 7.625
+        let mut strl = limit(220, 6, 0, 0);
+        strl.per_level = true;
+        strl.op_param = 3;
+        assert_eq!(strl.to_user(61), 61.0);
+        assert_eq!(strl.display_value(61), 7.625);
+        assert_eq!(strl.stored_from_display(7.625), 61);
+        assert!((strl.user_step() - 0.125).abs() < 1e-9);
+
+        // 同时带位移（item_hp_perlevel：SaveAdd 0、ValShift 8）：
+        // d2s 值 16128 → 字段 (16128 >> 8) + 0 = 63 → 每级 63/8 = 7.875
+        let mut hpl = limit(216, 6, 0, 8);
+        hpl.per_level = true;
+        hpl.op_param = 3;
+        assert_eq!(hpl.to_user(16128), 63.0, "先还原字段");
+        assert_eq!(hpl.display_value(16128), 7.875, "再除以 8 得每级");
+        assert_eq!(hpl.stored_from_display(7.875), 16128, "存回 d2s 形态");
+    }
+
     /// 显示值 ↔ 原始值的换算（**用户只看游戏值**）。
     ///
     /// 这条是用户明确要求的："我们修改器给用户看的要是游戏里面展示的，
     /// 换算是我们自己完成的，不要让用户感知到"。
     #[test]
     fn display_conversion_matches_game() {
-        // 生命：ValShift 8 → 存档 16128 在游戏里是 63
+        // 生命：ValShift 8 / SaveAdd 32 → d2s 的 16128 对应字段 95
         let hp = limit(7, 9, 32, 8);
-        assert_eq!(hp.to_display(16128), 63);
-        assert_eq!(hp.to_stored(63.0), 16128);
-        assert_eq!(hp.user_divisor(), 256, "只有移位，没有按等级加成");
-        // 显示范围是 1..511（9 位字段满值），不是 256..122624
-        assert_eq!(hp.display_min(), 1, "0 会被写侧跳过");
-        assert_eq!(hp.display_max(), 511);
-        assert_eq!(hp.range_text(), "1–511");
-        assert!(
-            !hp.range_text().contains("122624"),
-            "范围不该出现内部数：{}",
-            hp.range_text()
-        );
+        assert_eq!(hp.to_user(16128), 95.0, "(16128>>8)+32");
+        assert_eq!(hp.to_stored(95.0), 16128, "存回 d2s 形态");
+        assert_eq!(hp.to_display(16128), 63, "仅在只有移位、无偏置时成立");
 
-        // 跑速：**不换算**（存档里的值本身就是游戏显示值），7 位字段满值 127。
-        // 实测存档里是 10/20/30/40 这些标准词缀值，所以 Save Add 只是
-        // 位字段的内部偏移，不能当成显示偏移去减（否则 127 会变成 107）。
+        // 跑速：**不换算**（存档里的值就是字段值再减偏置）
         let frw = limit(96, 7, 20, 0);
-        assert_eq!(frw.to_display(30), 30, "存档 30 就是游戏 30");
-        assert_eq!(frw.to_stored(30.0), 30);
-        assert_eq!(frw.user_divisor(), 1);
-        assert_eq!(frw.display_min(), 0);
-        assert_eq!(frw.display_max(), 127, "用户看到的满值是 127");
-        assert_eq!(frw.range_text(), "0–127");
+        assert_eq!(frw.to_user(30), 50.0);
+        assert_eq!(frw.to_stored(50.0), 30);
 
         // 所有技能：3 位 → 0..7
         let sk = limit(127, 3, 0, 0);
         assert_eq!(sk.range_text(), "0–7");
-
-        // 力量：不换算，8 位满值 255
-        let strl = limit(0, 8, 32, 0);
-        assert_eq!(strl.to_display(15), 15);
-        assert_eq!(strl.display_max(), 255);
-        assert_eq!(strl.range_text(), "0–255");
     }
 
     /// 参数位是**另算一段位**的，所以值仍按位宽判，只给提示。
@@ -577,14 +624,15 @@ mod tests {
         assert_eq!((strl.per_level_rate(61) * 52.0) as i64, 396);
 
         // **同时带移位与按等级加成**（item_hp_perlevel：op param 3 + ValShift 8）
-        // 除数是 8 × 256 = 2048；只算一个会把 16128 显示成 2016（踩过）。
+        // 先把 d2s 值还原成字段（`16128 >> 8 = 63`），再除以 8 得每级 7.875。
+        // 只做其中一个会得到 2016 或 63（都踩过）。
         let mut hpl = limit(216, 6, 0, 8);
         hpl.per_level = true;
         hpl.op_param = 3;
-        assert_eq!(hpl.user_divisor(), 2048, "8 × 256");
-        assert_eq!(hpl.to_user(16128), 7.875, "16128 / 2048");
-        assert_eq!(hpl.to_stored(7.875), 16128, "存回整数 16128");
-        assert_eq!(format_rate(hpl.to_user(16128)), "7.875");
+        assert_eq!(hpl.to_user(16128), 63.0, "先还原字段");
+        assert_eq!(hpl.display_value(16128), 7.875, "再除以 8 得每级");
+        assert_eq!(hpl.stored_from_display(7.875), 16128, "存回 d2s 形态");
+        assert_eq!(format_rate(hpl.display_value(16128)), "7.875");
         // 界面步长是 1/8 = 0.125（填 7.875 → 存 63）
         assert!((hpl.user_step() - 0.125).abs() < 1e-9);
 
