@@ -486,18 +486,24 @@ function renderItemDetail(detail: ItemDetailDto) {
         ? `<span class="muted">${escapeHtml(parts.join("｜"))}</span>`
         : "";
       const nameCls = s.userVisible ? "" : ' class="muted"';
-      // 输入框里放的是**游戏显示值**，上下限也是显示值——
-      // 存档里的原始数由后端换算，用户不需要知道。
-      const bounds =
+      // 输入框是**存档里的值**，上下限/步长也用它，保持同一口径。
+      //
+      // 用 `type="text"` 而不是 `type="number"`：`number` 在 value 与
+      // step/min 不匹配时，Chromium 会**把输入框画成空白**（值只在 DOM 属性里），
+      // 看起来就像"值没显示"。范围校验由我们自己的
+      // `statValueProblem()` + 后端两处负责，不依赖浏览器。
+      const hint =
         s.minValue !== null && s.maxValue !== null
-          ? ` min="${s.minValue}" max="${s.maxValue}"`
+          ? `范围 ${s.minValue} ~ ${s.maxValue}`
           : "";
-      const stepAttr = s.displayStep > 1 ? ` step="${s.displayStep}"` : "";
       return `<tr>
         <td>${s.id}</td>
         <td${nameCls}>${s.name}${s.userVisible ? "" : " <span class='muted'>(内部字段)</span>"}</td>
         <td class="muted">${s.internal}</td>
-        <td><input type="number" class="cell-input" value="${s.displayValue}"${bounds}${stepAttr} data-stat-id="${s.id}" data-stat-layer="${s.layer}" /></td>
+        <td><input type="text" inputmode="numeric" class="cell-input" value="${s.value}"
+          data-stat-id="${s.id}" data-stat-layer="${s.layer}"
+          data-min="${s.minValue ?? ""}" data-max="${s.maxValue ?? ""}"
+          data-step="${s.displayStep}" title="${escapeAttr(hint)}" /></td>
         <td>${note}</td>
         <td><button class="mini danger" data-del-stat="${s.id}" data-del-layer="${s.layer}">删除</button></td>
       </tr>`;
@@ -669,9 +675,10 @@ const collectProblems: string[] = [];
  */
 function statValueProblem(id: number, value: number, el: HTMLInputElement): string | null {
   if (Number.isNaN(value)) return `属性 ID ${id} 的值不是数字`;
-  const min = el.min === "" ? null : Number(el.min);
-  const max = el.max === "" ? null : Number(el.max);
-  const step = el.step === "" ? 1 : Number(el.step);
+  // 范围与步长写在 data-* 上（输入框是 type=text，没有原生 min/max/step）
+  const min = el.dataset.min === "" || el.dataset.min === undefined ? null : Number(el.dataset.min);
+  const max = el.dataset.max === "" || el.dataset.max === undefined ? null : Number(el.dataset.max);
+  const step = el.dataset.step === undefined || el.dataset.step === "" ? 1 : Number(el.dataset.step);
   if (step > 1 && value % step !== 0) {
     return `属性 ID ${id} 的值 ${value} 存不进去：必须是 ${step} 的倍数（否则会被截断）`;
   }
