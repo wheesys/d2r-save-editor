@@ -16,6 +16,8 @@ d2r-core = { workspace = true }
 d2r-data = { workspace = true }
 d2r-app = { workspace = true }
 serde_json = { workspace = true }
+# quest-probe 要直接看任务段的原始位（core 只做解读后的接口）
+d2s = "0.1.0"
 
 [[bin]]
 name = "layout-probe"
@@ -23,3 +25,6 @@ path = "src/bin/layout_probe.rs"
 [[bin]]
 name = "grid-probe"
 path = "src/bin/grid_probe.rs"
+[[bin]]
+name = "quest-probe"
+path = "src/bin/quest_probe.rs"

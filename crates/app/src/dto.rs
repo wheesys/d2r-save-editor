@@ -101,6 +101,39 @@ pub struct WaypointsDto {
     pub active: Vec<bool>,
 }
 
+/// 一个任务槽（供任务页显示）。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestDto {
+    /// 幕下标（0–4）。
+    pub act: usize,
+    /// 槽下标（0–15）。
+    pub slot: usize,
+    /// 任务名（来自文本表；非任务槽会是占位名）。
+    pub name: String,
+    /// 该槽的原始位。界面显示它便于核对，不参与判定。
+    pub flags: u16,
+    /// 状态。
+    pub state: d2r_data::QuestState,
+    /// 是不是可编辑的真任务槽。
+    ///
+    /// 序章槽、收尾槽、Act IV 的 NPC 对话槽、Act V 的未使用槽都是 `false`，
+    /// 界面据此禁用勾选——这些槽改了没有意义甚至有害。
+    pub editable: bool,
+}
+
+/// 一个难度的任务。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestDifficultyDto {
+    /// 难度名。
+    pub difficulty: String,
+    /// 难度下标（0=普通 1=噩梦 2=地狱）。
+    pub difficulty_index: u8,
+    /// 各幕的任务，`[幕][槽]`。
+    pub acts: Vec<Vec<QuestDto>>,
+}
+
 /// 一条物品（供物品页显示）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

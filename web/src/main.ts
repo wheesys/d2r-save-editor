@@ -15,6 +15,8 @@ import {
   type ItemDetailDto,
   type StatCatalogEntry,
   type MercenaryItem,
+  type QuestDifficultyDto,
+  type QuestState,
   type LayoutSettings,
   type LayoutHints,
   type BoundsIssue,
@@ -502,7 +504,7 @@ async function loadAll() {
     }
   }
   renderWaypoints(await call<WaypointsDto[]>("waypoints"));
-  renderQuests();
+  await loadQuests();
   try {
     mercItems = await call<MercenaryItem[]>("mercenary_items");
   } catch {
@@ -520,11 +522,100 @@ async function loadAll() {
   setDirty(await call<boolean>("is_dirty"));
 }
 
-/** 任务进度：后端还没暴露任务编辑，先把状态说清楚，不假装能改 */
+/** 任务视图缓存 */
+let quests: QuestDifficultyDto[] = [];
+/** 当前显示的任务难度下标 */
+let questDifficulty = 0;
+
+/** 按难度渲染任务列表（用真实的位判定状态） */
 function renderQuests() {
+  const data = quests[questDifficulty];
+  if (!data) {
+    $("#quests").innerHTML = `<div class="muted">没有任务数据。</div>`;
+    return;
+  }
+  const stateLabel: Record<QuestState, string> = {
+    notStarted: "未开始",
+    inProgress: "进行中",
+    completed: "已完成",
+  };
   $("#quests").innerHTML =
-    `<div class="muted">任务进度的读写尚未接入（存档的任务段已能解析，编辑接口还没做）。</div>`;
+    `<div class="quest-diff">` +
+    quests
+      .map(
+        (q, i) =>
+          `<button class="mini ${i === questDifficulty ? "active" : ""}" data-quest-diff="${i}">${escapeHtml(q.difficulty)}</button>`,
+      )
+      .join("") +
+    `</div>` +
+    data.acts
+      .map((slots, act) => {
+        // 只显示真任务槽，非任务槽（序章/收尾/对话）不列出来，避免误导
+        const real = slots.filter((s) => s.editable);
+        if (real.length === 0) return "";
+        return `<div class="quest-act">
+          <div class="quest-act-head">第 ${act + 1} 幕</div>
+          <div class="quest-list">
+            ${real
+              .map(
+                (q) => `<label class="quest ${q.state}">
+                  <input type="checkbox" data-quest-act="${q.act}" data-quest-slot="${q.slot}"
+                    ${q.state === "completed" ? "checked" : ""} />
+                  <span class="quest-name">${escapeHtml(q.name)}</span>
+                  <span class="quest-state">${stateLabel[q.state]}</span>
+                </label>`,
+              )
+              .join("")}
+          </div>
+        </div>`;
+      })
+      .join("");
+
+  // 难度切换
+  document.querySelectorAll<HTMLButtonElement>("[data-quest-diff]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      questDifficulty = Number(btn.dataset.questDiff);
+      renderQuests();
+    });
+  });
+  // 勾选：立即应用（不攒到最后，任务之间没有依赖）
+  document.querySelectorAll<HTMLInputElement>("input[data-quest-act]").forEach((el) => {
+    el.addEventListener("change", async () => {
+      const act = Number(el.dataset.questAct);
+      const slot = Number(el.dataset.questSlot);
+      const edit = el.checked
+        ? { kind: "completeQuest", difficulty: questDifficulty, act, slot }
+        : { kind: "clearQuest", difficulty: questDifficulty, act, slot };
+      try {
+        await call<number>("apply_quest_edits", { edits: [edit] });
+        toast(`已更新「${quests[questDifficulty].acts[act][slot].name}」。点「保存」才会写入文件。`);
+        await loadQuests();
+      } catch (e) {
+        showError(e, "任务修改被拒绝");
+        await loadQuests();
+      }
+    });
+  });
   $("#quests-section").classList.remove("hidden");
+}
+
+/** 重新读取任务视图 */
+async function loadQuests() {
+  quests = await call<QuestDifficultyDto[]>("quests");
+  renderQuests();
+}
+
+/** 把当前难度的全部任务标记完成 */
+async function completeAllQuests() {
+  try {
+    const n = await call<number>("apply_quest_edits", {
+      edits: [{ kind: "completeAllQuests", difficulty: questDifficulty }],
+    });
+    toast(`已把「${quests[questDifficulty]?.difficulty ?? ""}」全部任务标记完成（${n} 条）。点「保存」才会写入文件。`);
+    await loadQuests();
+  } catch (e) {
+    showError(e, "任务修改被拒绝");
+  }
 }
 
 /**
@@ -783,6 +874,8 @@ function bind() {
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && !$("#item-modal").classList.contains("hidden")) closeItemModal();
   });
+
+  $("#btn-quests-all").addEventListener("click", () => void completeAllQuests());
 
   // 页签切换
   document.querySelectorAll<HTMLButtonElement>("#tabs .tab").forEach((btn) => {

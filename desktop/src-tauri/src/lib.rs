@@ -87,6 +87,8 @@ pub fn run() {
             commands::current_save,
             commands::item_icons,
             commands::waypoint_names,
+            commands::quests,
+            commands::apply_quest_edits,
             commands::mercenary_items,
             commands::apply_edits,
             commands::verify,

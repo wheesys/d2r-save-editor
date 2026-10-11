@@ -84,7 +84,13 @@
 
         <section id="quests-section" class="card hidden">
           <h2>任务</h2>
-          <p class="muted">任务进度编辑尚未接入：先展示存档里读到的各幕进度标记。</p>
+          <p class="muted">
+            勾选表示该任务已完成。<strong>未开始 / 进行中 / 已完成</strong> 三种状态按存档里
+            真实的位判定，不是猜的。灰色不可勾的是非任务槽（该幕序章、收尾、以及别幕 NPC 的对话记录）。
+          </p>
+          <div class="actions">
+            <button id="btn-quests-all" class="primary">全部任务标记完成（当前难度）</button>
+          </div>
           <div id="quests" class="quests"></div>
         </section>
       </section>

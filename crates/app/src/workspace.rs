@@ -9,7 +9,7 @@ use d2r_data::{ItemNamer, SkillNamer, Strings, TableStore};
 
 use crate::dto::{
     AppError, CharacterDto, DatasetInfo, EditRequest, ItemDetailDto, ItemDto, ItemStatDto,
-    SaveInfo, SaveResult, SkillDto, VerifyResult, WaypointsDto,
+    QuestDifficultyDto, QuestDto, SaveInfo, SaveResult, SkillDto, VerifyResult, WaypointsDto,
 };
 
 /// 保存结果（内部形态，含是否备份）。
@@ -67,6 +67,8 @@ pub struct Workspace {
     stat_namer: d2r_data::StatNamer,
     /// 小站名解析器（位下标 → 小站中文名）。
     waypoint_namer: d2r_data::WaypointNamer,
+    /// 任务名解析器（幕/槽 → 任务中文名）。
+    quest_namer: d2r_data::QuestNamer,
     /// 当前编辑会话。
     session: Option<EditSession>,
     /// 当前已打开的存档信息（未打开时为 `None`）。
@@ -166,6 +168,7 @@ impl Workspace {
             Some(t) => d2r_data::WaypointNamer::new(t, &strings),
             None => d2r_data::WaypointNamer::default(),
         };
+        let quest_namer = d2r_data::QuestNamer::new(&strings);
 
         Self {
             game_dir,
@@ -175,6 +178,7 @@ impl Workspace {
             stat_limits,
             stat_namer,
             waypoint_namer,
+            quest_namer,
             strings,
             lang: "zhCN".to_string(),
             layout: LayoutSettings::default(),
@@ -319,6 +323,55 @@ impl Workspace {
                 active,
             })
             .collect())
+    }
+
+    /// 任务视图：每个难度 → 各幕 → 各槽。
+    ///
+    /// 只有真任务槽会标 `editable`，界面据此禁用其它槽的勾选
+    /// （序章、收尾槽、Act IV 的 NPC 对话槽、Act V 的未使用槽都不是任务）。
+    pub fn quests(&self) -> Result<Vec<QuestDifficultyDto>, AppError> {
+        let raw = self.session()?.quests();
+        const NAMES: [&str; 3] = ["普通", "噩梦", "地狱"];
+        Ok(raw
+            .into_iter()
+            .enumerate()
+            .map(|(index, acts)| QuestDifficultyDto {
+                difficulty: NAMES.get(index).copied().unwrap_or("?").to_string(),
+                difficulty_index: index as u8,
+                acts: acts
+                    .into_iter()
+                    .enumerate()
+                    .map(|(act, slots)| {
+                        let real_act_count = d2r_core::quest_count_of_act(act);
+                        slots
+                            .into_iter()
+                            .enumerate()
+                            .map(|(slot, flags)| QuestDto {
+                                act,
+                                slot,
+                                name: self.quest_namer.name_of(act, slot),
+                                flags,
+                                state: d2r_data::QuestState::from_flags(
+                                    flags,
+                                    d2r_core::QUEST_COMPLETE_MASK,
+                                ),
+                                editable: self.quest_namer.is_real_quest(act, slot)
+                                    && slot <= real_act_count,
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            })
+            .collect())
+    }
+
+    /// 应用任务修改，返回生效条数。
+    pub fn apply_quest_edits(&mut self, edits: &[d2r_core::Edit]) -> Result<usize, AppError> {
+        let count = edits.len();
+        self.session_mut()?
+            .apply_all(edits)
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Ok(count)
     }
 
     /// 当前已打开的存档信息（未打开时为 `None`）。

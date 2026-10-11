@@ -30,6 +30,7 @@ fn main() -> ExitCode {
         "items" => cmd_items(&args[1..]),
         "item" => cmd_item(&args[1..]),
         "stats" => cmd_stats(&args[1..]),
+        "quests" => cmd_quests(&args[1..]),
         "export-items" => cmd_export_items(&args[1..]),
         "import-item" => cmd_import_item(&args[1..]),
         "-h" | "--help" | "help" => {
@@ -997,6 +998,110 @@ fn cmd_edit(args: &[String]) -> ExitCode {
             ExitCode::from(1)
         }
     }
+}
+/// `quests`：显示任务进度（名字 + 三态），可选把某难度全部标记完成。
+///
+/// 只列**真任务槽**：序章、收尾槽、Act IV 的 NPC 对话槽、Act V 的未使用槽都不是任务，
+/// 它们的位集也常常非零（看起来像"进行中"），列出来只会误导。
+fn cmd_quests(args: &[String]) -> ExitCode {
+    let value_of = |flag: &str| -> Option<String> {
+        args.iter()
+            .position(|a| a == flag)
+            .and_then(|i| args.get(i + 1))
+            .cloned()
+    };
+    let json = args.iter().any(|a| a == "--json");
+    let complete_all = args.iter().any(|a| a == "--complete-all");
+    let Some(target) = args.iter().find(|a| !a.starts_with("--")).cloned() else {
+        eprintln!(
+            "用法: d2r quests <文件.d2s> [--json]\n     \
+             d2r quests <文件.d2s> --complete-all [--difficulty 0|1|2] [--out 新文件]"
+        );
+        return ExitCode::from(2);
+    };
+
+    if complete_all {
+        let difficulty: u8 = value_of("--difficulty")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let mut session = match d2r_core::EditSession::open(&target) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("打开失败：{e}");
+                return ExitCode::from(1);
+            }
+        };
+        if let Err(e) = session.apply(d2r_core::Edit::CompleteAllQuests { difficulty }) {
+            eprintln!("修改失败：{e}");
+            return ExitCode::from(1);
+        }
+        match session.verify() {
+            Ok((_, true)) => {}
+            Ok((_, false)) => {
+                eprintln!("写前校验未通过，已放弃写入");
+                return ExitCode::from(1);
+            }
+            Err(e) => {
+                eprintln!("写前校验失败：{e}");
+                return ExitCode::from(1);
+            }
+        }
+        let dest = value_of("--out").unwrap_or_else(|| target.clone());
+        if let Err(e) = session.save_as(&dest) {
+            eprintln!("保存失败：{e}");
+            return ExitCode::from(1);
+        }
+        println!("已把难度 {difficulty} 的全部任务标记完成 → {dest}");
+    }
+
+    // 名字与三态判定都在应用层，CLI 不重复实现
+    let mut workspace = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    if let Err(e) = workspace.open(&target) {
+        eprintln!("打开失败：{e}");
+        return ExitCode::from(1);
+    }
+    let list = match workspace.quests() {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("读取任务失败：{e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&list).unwrap_or_default()
+        );
+        return ExitCode::SUCCESS;
+    }
+    for diff in &list {
+        let done = diff
+            .acts
+            .iter()
+            .flatten()
+            .filter(|q| q.editable && q.state == d2r_data::QuestState::Completed)
+            .count();
+        let total = diff.acts.iter().flatten().filter(|q| q.editable).count();
+        println!("【{}】已完成 {done}/{total}", diff.difficulty);
+        for (act, slots) in diff.acts.iter().enumerate() {
+            let real: Vec<&d2r_app::QuestDto> = slots.iter().filter(|q| q.editable).collect();
+            if real.is_empty() {
+                continue;
+            }
+            println!("  第 {} 幕", act + 1);
+            for q in real {
+                println!(
+                    "    槽{:<2} {:<22} {:<8} (0x{:04X})",
+                    q.slot,
+                    q.name,
+                    q.state.label(),
+                    q.flags
+                );
+            }
+        }
+    }
+    ExitCode::SUCCESS
 }
 fn cmd_view(args: &[String]) -> ExitCode {
     let json = args.iter().any(|a| a == "--json");

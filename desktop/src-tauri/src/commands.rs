@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use d2r_app::{
-    AppError, CharacterDto, DatasetInfo, ItemDto, SaveInfo, SaveResult, SkillDto, VerifyResult,
-    WaypointsDto, Workspace,
+    AppError, CharacterDto, DatasetInfo, ItemDto, QuestDifficultyDto, SaveInfo, SaveResult,
+    SkillDto, VerifyResult, WaypointsDto, Workspace,
 };
 use tauri::State;
 
@@ -195,6 +195,17 @@ pub fn waypoint_names(state: State<'_, AppState>) -> Vec<String> {
 #[tauri::command]
 pub fn mercenary_items(state: State<'_, AppState>) -> R<Vec<d2r_core::MercenaryItem>> {
     state.0.lock().unwrap().mercenary_items()
+}
+/// 任务视图（每个难度 → 各幕 → 各槽）。
+#[tauri::command]
+pub fn quests(state: State<'_, AppState>) -> R<Vec<QuestDifficultyDto>> {
+    state.0.lock().unwrap().quests()
+}
+
+/// 应用任务修改。
+#[tauri::command]
+pub fn apply_quest_edits(state: State<'_, AppState>, edits: Vec<d2r_core::Edit>) -> R<usize> {
+    state.0.lock().unwrap().apply_quest_edits(&edits)
 }
 /// 应用版本信息。
 #[tauri::command]

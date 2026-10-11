@@ -204,3 +204,23 @@ export interface MercenaryItem {
   socketedCount: number;
   stats: [number, number, number][];
 }
+/** 任务状态（与后端 QuestState 对应）。 */
+export type QuestState = "notStarted" | "inProgress" | "completed";
+
+export interface QuestDto {
+  act: number;
+  slot: number;
+  name: string;
+  /** 原始位（显示用，便于核对；判定不用它） */
+  flags: number;
+  state: QuestState;
+  /** 是否是可编辑的真任务槽（序章/收尾/NPC 对话槽为 false） */
+  editable: boolean;
+}
+
+export interface QuestDifficultyDto {
+  difficulty: string;
+  difficultyIndex: number;
+  /** [幕][槽] */
+  acts: QuestDto[][];
+}

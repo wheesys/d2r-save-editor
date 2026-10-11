@@ -238,6 +238,34 @@ pub fn info() -> BundleInfo {
     }
 }
 
+/// 测试用：极简 base64 解码，用来验证上面的编码。
+#[cfg(test)]
+fn base64_decode_for_test(input: &str) -> Vec<u8> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut lookup = [255u8; 256];
+    for (i, c) in TABLE.iter().enumerate() {
+        lookup[*c as usize] = i as u8;
+    }
+    let mut out = Vec::new();
+    let mut buffer = 0u32;
+    let mut bits = 0u32;
+    for c in input.bytes() {
+        if c == b'=' {
+            break;
+        }
+        let v = lookup[c as usize];
+        if v == 255 {
+            continue;
+        }
+        buffer = (buffer << 6) | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buffer >> bits) as u8);
+        }
+    }
+    out
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,33 +319,4 @@ mod tests {
         let bytes = base64_decode_for_test(payload);
         assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "解出来应是 PNG 头");
     }
-}
-
-/// 测试用：极简 base64 解码，用来验证上面的编码。
-#[cfg(test)]
-fn base64_decode_for_test(input: &str) -> Vec<u8> {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut lookup = [255u8; 256];
-    for (i, c) in TABLE.iter().enumerate() {
-        lookup[*c as usize] = i as u8;
-    }
-    let mut out = Vec::new();
-    let mut buffer = 0u32;
-    let mut bits = 0u32;
-    for c in input.bytes() {
-        if c == b'=' {
-            break;
-        }
-        let v = lookup[c as usize];
-        if v == 255 {
-            continue;
-        }
-        buffer = (buffer << 6) | v as u32;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buffer >> bits) as u8);
-        }
-    }
-    out
 }

@@ -36,3 +36,5 @@ pub use save::{RoundTrip, SaveError, SaveFile, SaveKind};
 
 /// 编译期版本信息。
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub use edit::{quest_count_of_act, MAX_QUESTS_PER_ACT, QUEST_COMPLETE_MASK};

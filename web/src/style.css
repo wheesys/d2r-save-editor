@@ -266,3 +266,25 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 }
 .wp.on { border-color: var(--accent); }
 .wp input { margin: 0; }
+/* ===== 任务 ===== */
+.quest-diff { display: flex; gap: 6px; margin-bottom: 10px; }
+.quest-diff .mini.active { border-color: var(--accent); color: var(--accent); }
+.quest-act { margin-bottom: 12px; }
+.quest-act-head { font-weight: 600; margin-bottom: 4px; color: var(--accent); }
+.quest-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.quest {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 10px;
+  background: var(--panel-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.quest input { margin: 0; }
+.quest.completed { border-color: var(--accent); }
+.quest-state { font-size: 11px; color: #9a9a9a; }
+.quest.completed .quest-state { color: var(--accent); }
+.quest.inProgress { border-color: #6f8fd6; }

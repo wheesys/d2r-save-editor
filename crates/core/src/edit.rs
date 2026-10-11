@@ -104,6 +104,76 @@ pub enum Edit {
         /// 是否开通。
         active: bool,
     },
+    /// 把某难度某幕的一个任务槽标为"已完成"。
+    ///
+    /// 只**置位**不覆盖：任务槽里除了"完成/奖励"相关位，还有进度、对话等状态位，
+    /// 整体覆盖会把它们抹掉（可能让游戏认为该任务从未开始）。
+    CompleteQuest {
+        /// 难度：0=普通 1=噩梦 2=地狱。
+        difficulty: u8,
+        /// 幕下标（0–4）。
+        act: usize,
+        /// 槽下标（0–15，真任务是 1–6）。
+        slot: usize,
+    },
+    /// 清空某难度某幕的一个任务槽（把该任务恢复成"未开始"）。
+    ClearQuest {
+        /// 难度。
+        difficulty: u8,
+        /// 幕下标（0–4）。
+        act: usize,
+        /// 槽下标（0–15）。
+        slot: usize,
+    },
+    /// 把某难度的全部任务标为已完成（不含 Act V 的未使用槽）。
+    CompleteAllQuests {
+        /// 难度。
+        difficulty: u8,
+    },
+}
+
+/// 任务位的原始值（与 `d2s::QuestFlags` 的位定义一致）。
+///
+/// 这里单独写一份是为了能在 `const` 上下文里组合出掩码；测试会与
+/// `d2s::QuestFlags` 逐位核对，避免两边漂移。
+pub mod quest_bits {
+    /// 奖励已领取。
+    pub const REWARD_GRANTED: u16 = 0x0001;
+    /// 任务出现在任务日志里。
+    pub const QUEST_LOG: u16 = 0x1000;
+}
+
+/// "该任务已完成"的判定与写入掩码。
+///
+/// 选它经过实测对比（6 个真实存档 × 3 个难度断面）：
+///
+/// - `QUEST_LOG` 与 `REWARD_GRANTED` 是**已完成任务上稳定出现**的两个位。
+///   用它们判定，`小五` 普通难度得到 22/30 已完成，与该角色实际进度吻合。
+/// - 加上 `COMPLETED_BEFORE`（0x8000）会漏判——它只在少数槽上出现
+///   （同一个角色的同类任务有的有、有的没有），只能得到 10/30。
+/// - 加 `COMPLETED_NOW`（0x4000）会**全部漏判**：这个位在所有样本里从不出现。
+///
+/// 写入时也置这两位：只置位不覆盖，保留进度、对话等其它状态位，
+/// 避免把"这任务做过什么"的记录抹掉。
+pub const QUEST_COMPLETE_MASK: u16 = quest_bits::QUEST_LOG | quest_bits::REWARD_GRANTED;
+
+/// 单幕的真任务槽数量（槽 1..=6）。
+///
+/// 这是**存档布局**（不是可配置数据），所以放在核心层；
+/// 各幕实际有几个任务由数据层的名字表决定（Act IV 只有 3 个）。
+pub const MAX_QUESTS_PER_ACT: usize = 6;
+
+/// 某幕实际有几个任务。
+///
+/// **Act IV 是例外：只有 3 个任务**（堕落天使、恐惧的终结、地狱熔炉），
+/// 它的槽 4..=7 装的是别幕 NPC 的对话状态（例如 Act I Flavie 的闲聊）。
+/// 批量操作必须按这个数量来，否则会把那些对话状态一起改掉。
+pub const fn quest_count_of_act(act: usize) -> usize {
+    if act == 3 {
+        3
+    } else {
+        MAX_QUESTS_PER_ACT
+    }
 }
 
 /// 编辑错误。
@@ -220,6 +290,33 @@ impl EditSession {
             .collect()
     }
 
+    /// 任务段原始值：返回 `[难度][幕][槽]`。
+    ///
+    /// 返回**原始位**而不是解读后的状态，是因为任务槽的位语义没有官方文档；
+    /// 解读放在上层（`d2r-data` 有名字表，应用层负责判定"已完成/已接到"）。
+    pub fn quests(&self) -> Vec<Vec<Vec<u16>>> {
+        use d2s::Difficulty;
+        let s = &self.file.save;
+        [Difficulty::Normal, Difficulty::Nightmare, Difficulty::Hell]
+            .iter()
+            .map(|d| {
+                let Some(q) = s.quests.get(*d) else {
+                    return vec![Vec::new(); 5];
+                };
+                [
+                    q.act1.slots(),
+                    q.act2.slots(),
+                    q.act3.slots(),
+                    q.act4.slots(),
+                    q.act5.slots(),
+                ]
+                .iter()
+                .map(|slots| slots.iter().map(|f| f.bits()).collect())
+                .collect()
+            })
+            .collect()
+    }
+
     /// 应用一条指令（不落盘）。
     pub fn apply(&mut self, edit: Edit) -> Result<(), EditError> {
         use d2s::StatId;
@@ -281,8 +378,83 @@ impl EditSession {
                     }
                 }
             }
+            Edit::CompleteQuest {
+                difficulty,
+                act,
+                slot,
+            } => {
+                // 只置位不覆盖：保留进度/对话等其它状态位
+                self.with_quest_slot(*difficulty, *act, *slot, |flags| {
+                    flags | QUEST_COMPLETE_MASK
+                })?;
+            }
+            Edit::ClearQuest {
+                difficulty,
+                act,
+                slot,
+            } => {
+                self.with_quest_slot(*difficulty, *act, *slot, |_| 0)?;
+            }
+            Edit::CompleteAllQuests { difficulty } => {
+                let d = difficulty_from(*difficulty)?;
+                let Some(q) = self.file.save.quests.get_mut(d) else {
+                    return Err(EditError::Invalid(format!(
+                        "难度 {difficulty} 的任务段不存在"
+                    )));
+                };
+                // 每幕只处理真任务槽：槽 0 是序章、槽 7 是收尾，
+                // Act IV 的槽 4..7 与 Act V 的槽 8..15 装的是别的东西，不能乱动。
+                let acts: [Vec<&mut d2s::QuestFlags>; 5] = [
+                    q.act1.slots_mut(),
+                    q.act2.slots_mut(),
+                    q.act3.slots_mut(),
+                    q.act4.slots_mut(),
+                    q.act5.slots_mut(),
+                ];
+                for (act, slots) in acts.into_iter().enumerate() {
+                    let count = quest_count_of_act(act);
+                    for flags in slots.into_iter().skip(1).take(count) {
+                        // bitflags 2.x 没有可变的 bits()，只能读出→算→写回
+                        *flags =
+                            d2s::QuestFlags::from_bits_retain(flags.bits() | QUEST_COMPLETE_MASK);
+                    }
+                }
+            }
         }
         self.applied.push(edit);
+        Ok(())
+    }
+
+    /// 对某难度某幕的一个任务槽做原地修改。
+    fn with_quest_slot(
+        &mut self,
+        difficulty: u8,
+        act: usize,
+        slot: usize,
+        edit: impl FnOnce(u16) -> u16,
+    ) -> Result<(), EditError> {
+        let d = difficulty_from(difficulty)?;
+        if act >= 5 {
+            return Err(EditError::Invalid(format!("幕下标越界：{act}（应为 0–4）")));
+        }
+        let Some(q) = self.file.save.quests.get_mut(d) else {
+            return Err(EditError::Invalid(format!(
+                "难度 {difficulty} 的任务段不存在"
+            )));
+        };
+        let mut slots: Vec<&mut d2s::QuestFlags> = match act {
+            0 => q.act1.slots_mut(),
+            1 => q.act2.slots_mut(),
+            2 => q.act3.slots_mut(),
+            3 => q.act4.slots_mut(),
+            _ => q.act5.slots_mut(),
+        }
+        .into_iter()
+        .collect();
+        let flags = slots
+            .get_mut(slot)
+            .ok_or_else(|| EditError::Invalid(format!("槽下标越界：{slot}")))?;
+        **flags = d2s::QuestFlags::from_bits_retain(edit(flags.bits()));
         Ok(())
     }
 

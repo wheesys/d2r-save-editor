@@ -16,6 +16,7 @@
 pub mod dataset;
 pub mod itemname;
 pub mod placement;
+pub mod questname;
 pub mod skillname;
 pub mod statlimit;
 pub mod statname;
@@ -29,6 +30,7 @@ pub use placement::{
     build_size_map, container_spec_from_tables, validate_body_slots, validate_region,
     ContainerSpec, Issue, PlacedItem, RegionReport, Severity, ValidationReport,
 };
+pub use questname::{QuestNamer, QuestState, MAX_QUESTS_PER_ACT};
 pub use skillname::SkillNamer;
 pub use statlimit::{StatLimit, StatLimits};
 pub use statname::{StatName, StatNamer};
