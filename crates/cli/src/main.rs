@@ -1324,18 +1324,40 @@ fn cmd_item(args: &[String]) -> ExitCode {
         "ID", "层", "名称", "内部名", "值"
     );
     for s in &detail.stats {
-        let note = if !s.user_visible {
-            "内部字段（可能不生效）".to_string()
-        } else if s.step > 1 {
-            format!("步长 {}", s.step)
+        // 「按等级」要写在最前面：这类属性存的是**每级**的值，
+        // 不说明的话 61 会被当成总值。
+        let mut notes: Vec<String> = Vec::new();
+        if s.per_level {
+            // "每级"的量用**显示值**（已按存储精度换算），游戏里看到的就是这个数；
+            // 合计由后端算好（值 × 物品等级），同样换算过。
+            notes.push(match s.effective_value {
+                Some(total) => format!(
+                    "每级 +{}（等级 {} → 合计 {}）",
+                    s.display_value, detail.item.level, total
+                ),
+                None => format!("每级 +{}", s.display_value),
+            });
+        }
+        if !s.user_visible {
+            notes.push("内部字段（可能不生效）".into());
+        }
+        if s.display_step > 1 {
+            notes.push(format!("按 1/{} 精度存储", s.display_step));
+        }
+        // 参数含义（如"获得 31 级「狂热」光环"）——比"含参数"有用得多
+        if let Some(pl) = &s.param_label {
+            notes.push(pl.clone());
         } else if s.has_param_bits {
-            "含参数".into()
-        } else {
-            String::new()
-        };
+            notes.push("含参数".into());
+        }
         println!(
             "{:>5} {:>3}  {:<22} {:<26} {:>12}  {}",
-            s.id, s.layer, s.name, s.internal, s.value, note
+            s.id,
+            s.layer,
+            s.name,
+            s.internal,
+            s.display_value,
+            notes.join("｜")
         );
     }
     ExitCode::SUCCESS

@@ -44,6 +44,14 @@ pub struct StatCatalogEntry {
     pub user_visible: bool,
     /// 描述串模板（洗格式串前的原文，仅供参考）。
     pub desc_template: Option<String>,
+    /// 可表示的**最小值（游戏显示值）**。
+    pub min_value: Option<i64>,
+    /// 可表示的**最大值（游戏显示值）**。
+    pub max_value: Option<i64>,
+    /// 范围的可读文本（显示值单位）。
+    pub range_text: Option<String>,
+    /// 存储精度（`2^ValShift`），1 表示无移位。
+    pub display_step: i64,
 }
 
 /// 编辑器工作区。
@@ -471,6 +479,58 @@ impl Workspace {
             .collect()
     }
 
+    /// 带参数属性的参数含义（把 `layer` 翻译成人看得懂的名字）。
+    ///
+    /// 参数位存的是**另一个命名空间里的 ID**，和技能 ID 不是一回事，
+    /// 所以不能一股脑按技能表查。目前只解最常用的一类：
+    /// `item_aura`（装备时获得光环）——参数是光环 ID，值是该光环的等级。
+    /// 游戏里的模板是 `ModitemAura = "装备时获得%d级%s光环"`。
+    ///
+    /// 认不出来的参数一律返回 `None`，由界面原样显示层号，
+    /// **不猜**（猜错会让人看不懂这行到底在说什么）。
+    fn param_label(&mut self, id: u16, value: i64, layer: i32) -> Option<String> {
+        let limit = self.stat_limits.get(id)?;
+        if !limit.has_param_bits {
+            return None;
+        }
+        // 参数位的值是**另一个命名空间里的 ID**：`item_aura` 的层是光环 ID
+        // （样本里的 122/123 正好对上 Fanaticism(*Id 122) / Conviction(*Id 123)），
+        // 而数值部分是光环等级（31 级合理，122 级不合理，所以两者不能互换）。
+        let param = layer.max(0) as u16;
+        match id {
+            // item_aura：层 = 光环 ID，值 = 等级。模板 ModitemAura = "获得%d级%s光环"
+            151 => {
+                let aura = self.skill_name_by_id(param)?;
+                Some(format!("获得 {value} 级「{aura}」光环"))
+            }
+            // item_addclassskills：层是职业行号
+            83 => {
+                let class = self.class_name_by_code(param)?;
+                Some(format!("{class} 技能等级 +{value}"))
+            }
+            // item_singleskill / item_nonclassskill：层是技能 ID
+            107 | 97 => {
+                let skill = self.skill_name_by_id(param)?;
+                Some(format!("技能「{skill}」+{value}"))
+            }
+            _ => None,
+        }
+    }
+
+    /// 按技能 ID 取**显示名**（本地化）。
+    fn skill_name_by_id(&mut self, skill_id: u16) -> Option<String> {
+        let namer = SkillNamer::new(&mut self.tables, &self.strings, self.lang.clone());
+        namer.name_by_id(skill_id)
+    }
+
+    /// 按 `PlayerClass.txt` 的行号取职业显示名（参数位存的是行号）。
+    fn class_name_by_code(&mut self, row_index: u16) -> Option<String> {
+        let table = self.tables.get("PlayerClass")?;
+        table
+            .cell_nonempty(row_index as usize, "Player Class")
+            .map(str::to_string)
+    }
+
     /// 技能名（`skills.txt` 的 `skill` 列英文值）→ 技能 ID。
     ///
     /// **直接用表里的 `skill` 列**，不要用解析出来的显示名：显示名是本地化的
@@ -755,6 +815,17 @@ impl Workspace {
                 // 逐条属性各有自己的有效范围（ItemStatCost 的位宽/偏移/移位），
                 // 界面要把它显示出来，用户才知道能填多少。
                 let limit = self.stat_limits.get(*id);
+                // 按等级加成的属性（*perlevel）存的是**每级的值**，不是总值；
+                // 界面要标明，并给出"等级 N → 合计 M"，否则会被当成总值。
+                let per_level = limit.map(|l| l.per_level).unwrap_or(false);
+                // 换算成**游戏里显示的值**（内部做掉，用户不需要知道）：
+                //   生命/法力 按 1/256 精度存；攻速/跑速这类带 SaveAdd 偏移。
+                let display = limit.map(|l| l.to_display(*value)).unwrap_or(*value);
+                // 范围也要用显示值，否则会显示成 -27–107 这种内部数
+                let (min_value, max_value) = match limit {
+                    Some(l) => (Some(l.to_display(l.min())), Some(l.to_display(l.max()))),
+                    None => (None, None),
+                };
                 ItemStatDto {
                     id: *id,
                     layer: *layer,
@@ -764,9 +835,15 @@ impl Workspace {
                     step: info.map(|s| s.step).unwrap_or(1),
                     has_param_bits: info.map(|s| s.has_param_bits).unwrap_or(false),
                     user_visible: info.map(|s| s.user_visible).unwrap_or(false),
-                    min_value: limit.map(|l| l.min()),
-                    max_value: limit.map(|l| l.max()),
+                    min_value,
+                    max_value,
                     range_text: limit.map(|l| l.range_text()),
+                    per_level,
+                    // 合计与显示值同单位：显示值 × 物品等级
+                    effective_value: per_level.then(|| display * i64::from(detail.level)),
+                    display_value: display,
+                    display_step: limit.map(|l| l.step()).unwrap_or(1),
+                    param_label: self.param_label(*id, *value, *layer),
                 }
             })
             .collect();
@@ -815,10 +892,10 @@ impl Workspace {
 
     /// 按目标应用物品改动。
     ///
-    /// 改属性值前**逐条按自己的规格校验**（`ItemStatCost` 的位宽/偏移/移位）：
-    /// 不同属性的有效值完全不同（`strength` 是 -32–223，`maxhp` 是 256–122624
-    /// 且必须是 256 的倍数，`item_allskills` 只有 0–7）。不校验的话，
-    /// 会被 d2s 静默截断、甚至让整条属性写盘后消失。
+    /// 界面上填的是**游戏显示值**，所以这里先换算回**存档原始值**，
+    /// 再逐条按自己的规格校验（`ItemStatCost` 的位宽/偏移/移位）：
+    /// 不同属性的有效值完全不同，不校验的话会被 d2s 静默截断、
+    /// 甚至让整条属性写盘后消失。
     ///
     /// 校验分两步，与不带目标的 [`Self::apply_item_edits`] 完全一致：
     /// 1. `check_item_edits` 预检范围（能提前拦住明显超范围的值）；
@@ -829,15 +906,17 @@ impl Workspace {
         target: d2r_core::ItemTarget,
         edits: &[d2r_core::ItemEdit],
     ) -> Result<usize, AppError> {
-        self.check_item_edits(edits)?;
+        // 显示值 → 原始值（内部换算）
+        let raw_edits = self.convert_stat_edits(edits);
+        self.check_item_edits(&raw_edits)?;
         self.session_mut()?
-            .apply_items_on(target, edits)
+            .apply_items_on(target, &raw_edits)
             .map_err(|e| AppError::invalid(e.to_string()))?;
-        if let Err(e) = self.verify_item_values(edits) {
+        if let Err(e) = self.verify_item_values(&raw_edits) {
             self.discard_item_edits();
             return Err(e);
         }
-        Ok(edits.len())
+        Ok(raw_edits.len())
     }
 
     /// 佣兵装备段里的物品。
@@ -868,14 +947,23 @@ impl Workspace {
         };
         source
             .into_iter()
-            .map(|s| StatCatalogEntry {
-                id: s.id,
-                name: s.display.clone(),
-                internal: s.internal.clone(),
-                step: s.step,
-                has_param_bits: s.has_param_bits,
-                user_visible: s.user_visible,
-                desc_template: s.desc_template.clone(),
+            .map(|s| {
+                // 范围与精度也要给出来：界面要在**用户填值之前**就显示
+                // "有效范围 0–127"，否则只能盲填再被拒。
+                let limit = self.stat_limits.get(s.id);
+                StatCatalogEntry {
+                    id: s.id,
+                    name: s.display.clone(),
+                    internal: s.internal.clone(),
+                    step: s.step,
+                    has_param_bits: s.has_param_bits,
+                    user_visible: s.user_visible,
+                    desc_template: s.desc_template.clone(),
+                    min_value: limit.map(|l| l.to_display(l.min())),
+                    max_value: limit.map(|l| l.to_display(l.max())),
+                    range_text: limit.map(|l| l.range_text()),
+                    display_step: limit.map(|l| l.step()).unwrap_or(1),
+                }
             })
             .collect()
     }
@@ -895,10 +983,12 @@ impl Workspace {
         self.stat_limits.len()
     }
 
-    /// 校验一批物品改动里的属性值是否超位宽（超了返回拒绝原因）。
+    /// 校验一批物品改动里的属性值是否可表示（超了返回拒绝原因）。
     ///
     /// 单独成函数而不是塞进 apply：这样界面可以在用户输入时就提示，
     /// 而不是等到点"应用"才报错。
+    ///
+    /// 报错里带**属性名**而不是 ID：用户看到"属性 96"根本不知道是哪个。
     pub fn check_item_edits(&self, edits: &[d2r_core::ItemEdit]) -> Result<(), AppError> {
         if self.stat_limits.is_empty() {
             return Ok(());
@@ -906,21 +996,53 @@ impl Workspace {
         for e in edits {
             match e {
                 d2r_core::ItemEdit::SetStat { stat, value, .. } => {
-                    self.stat_limits
-                        .check(*stat, *value)
-                        .map_err(AppError::invalid)?;
+                    self.check_one_stat(*stat, *value)?;
                 }
                 d2r_core::ItemEdit::ReplaceStats { stats, .. } => {
                     for (stat, value, _) in stats {
-                        self.stat_limits
-                            .check(*stat, *value)
-                            .map_err(AppError::invalid)?;
+                        self.check_one_stat(*stat, *value)?;
                     }
                 }
                 _ => {}
             }
         }
         Ok(())
+    }
+
+    /// 校验单个属性值，报错里带属性名。
+    ///
+    /// `value` 是**界面上的游戏显示值**。
+    fn check_one_stat(&self, stat: u16, value: i64) -> Result<(), AppError> {
+        let label = self.stat_namer.display_or_id(stat);
+        self.stat_limits
+            .check_named(stat, value, Some(&label))
+            .map_err(AppError::invalid)
+    }
+
+    /// 把一批改动里的属性值从**界面显示值**换算成**存档原始值**。
+    ///
+    /// 界面只显示/输入游戏值（生命 63、跑速 30），存档里存的是原始数
+    /// （生命 16128、跑速 50）。这层换算由后端做掉，用户不需要感知。
+    /// 非属性类改动原样保留。
+    fn convert_stat_edits(&self, edits: &[ItemEdit]) -> Vec<ItemEdit> {
+        edits
+            .iter()
+            .map(|e| match e {
+                ItemEdit::SetStat { index, stat, value } => ItemEdit::SetStat {
+                    index: *index,
+                    stat: *stat,
+                    value: self.stat_limits.display_to_raw(*stat, *value),
+                },
+                ItemEdit::ReplaceStats { index, stats } => ItemEdit::ReplaceStats {
+                    index: *index,
+                    stats: stats
+                        .iter()
+                        .map(|(s, v, l)| (*s, self.stat_limits.display_to_raw(*s, *v), *l))
+                        .collect(),
+                },
+                other => other.clone(),
+            })
+            .collect()
     }
 
     /// 应用一批物品改动（原子）。

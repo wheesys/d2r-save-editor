@@ -472,23 +472,35 @@ function renderItemDetail(detail: ItemDetailDto) {
       // 逐条属性各有自己的有效范围（来自 ItemStatCost 的位宽/偏移/移位），
       // 直接显示出来并作为输入框的上下限，用户就不会填到会被截断的值。
       const parts: string[] = [];
+      // 「按等级加成」要放最前：这类属性存的是**每级**的值，
+      // 不说明的话会被当成总值（用户提过这个）。
+      if (s.perLevel) {
+        parts.push(
+          s.effectiveValue !== null
+            ? `每级 +${s.displayValue}（等级 ${it.level} → 合计 ${s.effectiveValue}）`
+            : `每级 +${s.displayValue}`,
+        );
+      }
       if (s.rangeText) parts.push(`有效范围 ${s.rangeText}`);
-      if (s.hasParamBits) parts.push("含参数位");
+      // 带参数属性的参数含义（如"获得 5 级「Holy Shock」光环"）
+      if (s.paramLabel) parts.push(s.paramLabel);
       if (!s.userVisible) parts.push("内部字段");
       const note = parts.length
         ? `<span class="muted">${escapeHtml(parts.join("｜"))}</span>`
         : "";
       const nameCls = s.userVisible ? "" : ' class="muted"';
+      // 输入框里放的是**游戏显示值**，上下限也是显示值——
+      // 存档里的原始数由后端换算，用户不需要知道。
       const bounds =
         s.minValue !== null && s.maxValue !== null
           ? ` min="${s.minValue}" max="${s.maxValue}"`
           : "";
-      const stepAttr = s.step > 1 ? ` step="${s.step}"` : "";
+      const stepAttr = s.displayStep > 1 ? ` step="${s.displayStep}"` : "";
       return `<tr>
         <td>${s.id}</td>
         <td${nameCls}>${s.name}${s.userVisible ? "" : " <span class='muted'>(内部字段)</span>"}</td>
         <td class="muted">${s.internal}</td>
-        <td><input type="number" class="cell-input" value="${s.value}"${bounds}${stepAttr} data-stat-id="${s.id}" data-stat-layer="${s.layer}" /></td>
+        <td><input type="number" class="cell-input" value="${s.displayValue}"${bounds}${stepAttr} data-stat-id="${s.id}" data-stat-layer="${s.layer}" /></td>
         <td>${note}</td>
         <td><button class="mini danger" data-del-stat="${s.id}" data-del-layer="${s.layer}">删除</button></td>
       </tr>`;
@@ -513,6 +525,102 @@ function renderItemDetail(detail: ItemDetailDto) {
 
 /** 明细面板里挂起的改动（删除属性等） */
 const pendingDetailEdits: ItemEdit[] = [];
+
+/**
+ * 「添加」属性：**立即生效**，不再需要另点「应用修改」。
+ *
+ * 这里曾经是把 `setStat` 挂到 `pendingDetailEdits`、等用户再点「应用修改」。
+ * 结果是**同一个属性被提交两次**（挂起的那条 + 界面上输入框的那条），
+ * 后端按顺序先处理挂起的旧值 → 报"超出范围" → 整批回滚，
+ * 于是用户看到"我明明改成 107 了还说我超范围"，而且什么都没生效。
+ * 现在直接把当前界面上的全部改动一起提交，列表立刻刷新，所见即所得。
+ */
+async function addStatNow() {
+  if (selectedItem === null) {
+    toast("先在物品表里点一件物品", "error");
+    return;
+  }
+  const id = Number(($("#add-stat-select") as HTMLSelectElement).value);
+  const rawValue = ($("#add-stat-value") as HTMLInputElement).value;
+  if (rawValue === "") {
+    toast("请填写属性值", "error");
+    return;
+  }
+  const entry = statCatalog.find((s) => s.id === id);
+  const name = entry?.name ?? `属性#${id}`;
+  const value = Number(rawValue);
+
+  // 先按该属性的可表示范围自查，给出**具体到这条属性**的提示
+  const problem = statValueProblem(id, value, $("#add-stat-value") as HTMLInputElement);
+  if (problem) {
+    $("#detail-result").innerHTML = `<div class="problem">${escapeHtml(problem)}</div>`;
+    return;
+  }
+
+  try {
+    // 直接把这条属性应用到物品上（后端会校验并读回比对）
+    await call<number>("apply_item_edits", {
+      edits: [{ kind: "setStat", index: selectedItem, stat: id, value }],
+      target: selectedTarget,
+    });
+    toast(`已添加：${name} = ${value}。点「保存」才写入文件。`);
+    // 重新读明细 → 新属性立刻出现在上面的列表里
+    await reloadItemDetail();
+  } catch (e) {
+    showError(e, `添加「${name}」被拒绝`);
+    $("#detail-result").textContent = String((e as { message?: string })?.message ?? e);
+  }
+}
+
+/**
+ * 选中的属性要在他**填值之前**就显示最大/最小值，并把输入框限制住。
+ *
+ * 之前只在提交后才报"超出范围"，用户等于盲填。
+ */
+function showAddStatHint() {
+  const sel = $("#add-stat-select") as HTMLSelectElement;
+  const input = $("#add-stat-value") as HTMLInputElement;
+  const hint = $("#add-stat-hint");
+  const id = Number(sel.value);
+  const entry = statCatalog.find((s) => s.id === id);
+  if (!entry) {
+    hint.textContent = "";
+    return;
+  }
+  const parts: string[] = [];
+  if (entry.minValue !== null && entry.maxValue !== null) {
+    parts.push(`有效范围 ${entry.minValue}–${entry.maxValue}`);
+  }
+  if (entry.displayStep > 1) parts.push(`按 1/${entry.displayStep} 精度存储`);
+  if (entry.hasParamBits) parts.push("含参数位");
+  if (!entry.userVisible) parts.push("内部字段（改了可能不生效）");
+  hint.textContent = parts.join("｜");
+
+  // 把范围写进输入框，浏览器会拦住越界与非法步长
+  if (entry.minValue !== null) input.min = String(entry.minValue);
+  else input.removeAttribute("min");
+  if (entry.maxValue !== null) input.max = String(entry.maxValue);
+  else input.removeAttribute("max");
+  if (entry.displayStep > 1) input.step = String(entry.displayStep);
+  else input.removeAttribute("step");
+  // 默认值取范围内的值，免得一打开就是非法的
+  if (entry.minValue !== null && Number(input.value) < entry.minValue) {
+    input.value = String(entry.minValue);
+  }
+}
+
+/** 重新读当前物品的明细并刷新弹窗（添加属性后立刻反映到列表里）。 */
+async function reloadItemDetail() {
+  const keep = selectedItem;
+  if (keep === null) return;
+  await loadAll();
+  const detail = await call<ItemDetailDto>("item_detail", {
+    index: keep,
+    target: selectedTarget,
+  });
+  renderItemDetail(detail);
+  openItemModal();
+}
 
 /** 收集明细面板的改动 */
 function collectDetailEdits(): ItemEdit[] {
@@ -1049,17 +1157,15 @@ function clearEmptyState() {
 function bind() {
   // 明细面板：应用该物品的修改 / 添加属性
   $("#btn-apply-detail").addEventListener("click", applyDetailEdits);
-  $("#btn-add-stat").addEventListener("click", () => {
-    const id = Number(($("#add-stat-select") as HTMLSelectElement).value);
-    const value = Number(($("#add-stat-value") as HTMLInputElement).value);
-    if (selectedItem === null) {
-      toast("先在物品表里点一件物品", "error");
-      return;
-    }
-    pendingDetailEdits.push({ kind: "setStat", index: selectedItem, stat: id, value });
-    const entry = statCatalog.find((s) => s.id === id);
-    toast(`已记录：${entry?.name ?? `属性#${id}`} = ${value}。点「应用该物品的修改」生效。`);
-  });
+  $("#btn-add-stat").addEventListener("click", addStatNow);
+
+  // 选中的属性要在**添加之前**就告诉他最大/最小值（否则填了才知道超范围）
+  $("#add-stat-select").addEventListener("change", showAddStatHint);
+  $("#add-stat-value").addEventListener("input", showAddStatHint);
+  // 属性目录是异步载入的，拿到后补一次提示
+  window.setTimeout(() => {
+    if (statCatalog.length > 0) showAddStatHint();
+  }, 800);
 
   // 导入/导出物品
   $("#btn-export-item").addEventListener("click", async () => {
