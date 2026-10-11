@@ -27,6 +27,7 @@ fn roundtrip_keeps_layout_and_confirmed() {
         layout: d2r_core::LayoutSettings {
             inventory_cols: 16,
             books_single_cell: true,
+            cube_single_cell: false,
             inventory_rows: 8,
             cube_cols: 8,
             cube_rows: 8,

@@ -69,9 +69,14 @@
       <section id="tab-skills" class="tab-panel hidden">
         <section id="skills-section" class="card hidden">
           <h2>技能</h2>
-          <p class="muted">只列出已加点的技能；「显示全部」可展开该职业全部技能槽位。</p>
-          <label class="inline"><input type="checkbox" id="show-all-skills" /> 显示全部</label>
-          <div id="skills" class="skills"></div>
+          <!-- 按游戏那样分三系技能树；技能点/职业从后端 skills_view 取 -->
+          <div id="skills-head" class="skills-head"></div>
+          <p class="muted">
+            按游戏的<strong>三系技能树</strong>排列，方块里是技能图标，下面的数字是该技能等级。
+            改完点「应用技能修改」，再点上方「保存」才写入文件。
+          </p>
+          <div id="skills" class="skill-trees"></div>
+          <div id="skills-unclassified"></div>
           <div class="actions"><button id="btn-apply-skills" class="primary">应用技能修改</button></div>
         </section>
       </section>
@@ -168,6 +173,9 @@
           <label class="inline">
             <input type="checkbox" id="l-books" /> 传送书/鉴定书只占一格（mod）
           </label>
+          <label class="inline">
+            <input type="checkbox" id="l-cube-one" /> 合成盒只占一格（mod）
+          </label>
         </div>
         <div class="actions">
           <button id="btn-apply-layout" class="primary">确认并应用布局</button>
@@ -201,10 +209,16 @@
         </p>
         <div class="table-wrap"><table id="item-stats"></table></div>
 
+        <!-- 新增属性单独一行并带标签：之前和按钮挤在同一行且没有标签，
+             看起来像一条多余的残留控件 -->
+        <div class="add-stat">
+          <span class="add-stat-label">新增属性</span>
+          <select id="add-stat-select" title="选择要添加的属性"></select>
+          <input id="add-stat-value" type="number" value="1" title="属性值" />
+          <button id="btn-add-stat">添加</button>
+        </div>
+
         <div class="actions">
-          <select id="add-stat-select"></select>
-          <input id="add-stat-value" type="number" value="1" />
-          <button id="btn-add-stat">添加属性</button>
           <button id="btn-export-item">导出为蓝图</button>
           <button id="btn-apply-detail" class="primary">应用修改</button>
         </div>

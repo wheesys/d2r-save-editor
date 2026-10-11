@@ -31,6 +31,7 @@ fn main() -> ExitCode {
         "item" => cmd_item(&args[1..]),
         "stats" => cmd_stats(&args[1..]),
         "quests" => cmd_quests(&args[1..]),
+        "skill-trees" => cmd_skill_trees(&args[1..]),
         "export-items" => cmd_export_items(&args[1..]),
         "import-item" => cmd_import_item(&args[1..]),
         "-h" | "--help" | "help" => {
@@ -1336,6 +1337,68 @@ fn cmd_item(args: &[String]) -> ExitCode {
             "{:>5} {:>3}  {:<22} {:<26} {:>12}  {}",
             s.id, s.layer, s.name, s.internal, s.value, note
         );
+    }
+    ExitCode::SUCCESS
+}
+/// 打印技能树分组（验证分组正确性用）。
+fn cmd_skill_trees(args: &[String]) -> ExitCode {
+    let Some(path) = args.first() else {
+        eprintln!("用法: d2r skill-trees <存档>");
+        return ExitCode::from(2);
+    };
+    let game_dir = d2r_app::default_game_dir();
+    let mut ws = d2r_app::Workspace::new(game_dir);
+    if let Err(e) = ws.open(path) {
+        eprintln!("打开失败：{e}");
+        return ExitCode::FAILURE;
+    }
+    let view = match ws.skills_view() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("读取失败：{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!(
+        "职业代码: {}",
+        if view.class_code.is_empty() {
+            "（未知）"
+        } else {
+            &view.class_code
+        }
+    );
+    println!("技能点  : {}", view.skill_points);
+    if view.trees.is_empty() {
+        println!("\n没有该职业的技能树（未知职业），界面会退回平铺列表。");
+    }
+    for tree in &view.trees {
+        let learned = tree.skills.iter().filter(|s| s.level > 0).count();
+        println!(
+            "\n【{}】{} 个技能，已加点 {}",
+            tree.name,
+            tree.skills.len(),
+            learned
+        );
+        for s in &tree.skills {
+            let mark = if s.level > 0 { "●" } else { "○" };
+            println!(
+                "  {mark} {:<22} Lv{:<3} 槽位 {}",
+                s.name.clone().unwrap_or_else(|| "（未解析）".into()),
+                s.level,
+                s.index
+            );
+        }
+    }
+    if !view.unclassified.is_empty() {
+        println!("\n未归类 {} 个:", view.unclassified.len());
+        for s in &view.unclassified {
+            println!(
+                "  ? {:<22} Lv{:<3} 槽位 {}",
+                s.name.clone().unwrap_or_else(|| "（未解析）".into()),
+                s.level,
+                s.index
+            );
+        }
     }
     ExitCode::SUCCESS
 }

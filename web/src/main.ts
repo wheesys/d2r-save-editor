@@ -29,6 +29,7 @@ import {
   type SaveInfo,
   type SaveResult,
   type SkillDto,
+  type SkillsViewDto,
   STAT,
   type VerifyResult,
   type WaypointsDto,
@@ -42,7 +43,10 @@ const $ = <T extends HTMLElement>(sel: string): T => {
 
 let skills: SkillDto[] = [];
 let items: ItemDto[] = [];
-let showAllSkills = false;
+/** 技能页视图（按游戏三系技能树分组）。后端不支持时为 null，界面退回平铺。 */
+let skillsView: SkillsViewDto | null = null;
+/** 技能图标缓存（按英文技能名取，与物品图标分开）。 */
+let skillIcons: Record<string, string> = {};
 
 function toast(message: string, kind: "ok" | "error" = "ok", ms = 4000) {
   const el = $("#toast");
@@ -126,24 +130,96 @@ function fillCharacter(c: CharacterDto) {
   $("#char-section").classList.remove("hidden");
 }
 
+/**
+ * 技能页：按游戏的**三系技能树**渲染。
+ *
+ * 每棵树是一个 2×5 的方块网格（技能图标 + 等级输入），与游戏里的技能树形态一致。
+ * 分组由后端 `skills_view` 给出——技能树的归属不在数据文件里，靠内置名单，
+ * 所以这里**只负责画**，不做归属判断。
+ *
+ * 职业未知（例如某个 mod 的自创职业没有名单）时后端会给空 `trees`，
+ * 那就退回平铺列表，并把未归类的技能照常列出来，免得有技能完全无法编辑。
+ */
 function renderSkills() {
-  const visible = showAllSkills ? skills : skills.filter((s) => s.level > 0);
-  $("#skills").innerHTML = visible
-    .map(
-      (s) => `
-      <div class="row ${s.level === 0 ? "zero" : ""}">
-        <span class="name" title="槽位 ${s.index}｜技能ID ${s.skillId ?? "?"}">${s.name ?? `（未命名技能 ${s.skillId ?? s.index}）`}</span>
-        <input type="number" min="0" max="99" data-skill-index="${s.index}" value="${s.level}" />
-      </div>`,
-    )
-    .join("");
-  const zeroCount = skills.filter((s) => s.level === 0).length;
-  if (!showAllSkills && zeroCount > 0) {
-    $("#skills").insertAdjacentHTML(
-      "beforeend",
-      `<div class="row zero"><span class="name muted">…还有 ${zeroCount} 个未加点槽位（勾选「显示全部」查看）</span></div>`,
-    );
+  // 顶部：职业 + 剩余技能点（游戏里也是这个位置）
+  const head = $("#skills-head");
+  if (skillsView && skillsView.classCode) {
+    head.innerHTML =
+      `<span class="badge">职业 ${escapeHtml(skillsView.classCode)}</span>` +
+      `<span class="muted">剩余技能点 <b>${skillsView.skillPoints}</b></span>`;
+  } else {
+    head.innerHTML = "";
   }
+
+  const trees = skillsView?.trees ?? [];
+  const host = $("#skills");
+  if (trees.length > 0) {
+    host.innerHTML = trees
+      .map(
+        (tree) => `
+      <div class="skill-tree">
+        <div class="skill-tree-head">${escapeHtml(tree.name)}</div>
+        <div class="skill-grid">
+          ${tree.skills.map((s) => skillCell(s)).join("")}
+        </div>
+      </div>`,
+      )
+      .join("");
+  } else {
+    // 没有技能树：平铺已加点的技能（未知职业时的退路）
+    host.innerHTML = "";
+  }
+
+  // 未归类的技能：单独一块，保证照样能改
+  const rest = skillsView?.unclassified ?? [];
+  const unclassifiedHost = $("#skills-unclassified");
+  if (rest.length > 0) {
+    unclassifiedHost.innerHTML =
+      `<div class="skill-tree"><div class="skill-tree-head">未归类技能（${rest.length}）</div>` +
+      `<div class="skill-list">${rest.map((s) => skillRow(s)).join("")}</div></div>`;
+  } else if (trees.length === 0) {
+    // 完全没有分组信息时，把所有技能平铺出来
+    unclassifiedHost.innerHTML =
+      `<div class="skill-tree"><div class="skill-tree-head">技能（${skills.length}）</div>` +
+      `<div class="skill-list">${skills.map((s) => skillRow(s)).join("")}</div></div>`;
+  } else {
+    unclassifiedHost.innerHTML = "";
+  }
+}
+
+/** 技能树里的一个方块：图标 + 等级输入 + 名字。 */
+function skillCell(s: SkillDto): string {
+  const icon = skillIcons[iconCodeOf(s)] ?? "";
+  const art = icon
+    ? `<img src="${icon}" alt="" />`
+    : `<span class="skill-fallback">${escapeHtml((s.name ?? "?").slice(0, 3))}</span>`;
+  const zeroCls = s.level > 0 ? "" : " zero";
+  const title = `槽位 ${s.index}｜技能ID ${s.skillId ?? "?"}｜${s.name ?? "（未解析）"}`;
+  return `<div class="skill-cell${zeroCls}" title="${escapeAttr(title)}">
+    <div class="skill-icon">${art}</div>
+    <div class="skill-name">${escapeHtml(s.name ?? `技能 ${s.skillId ?? s.index}`)}</div>
+    <input type="number" min="0" max="99" data-skill-index="${s.index}" value="${s.level}" />
+  </div>`;
+}
+
+/** 平铺列表里的一行（未归类技能用）。 */
+function skillRow(s: SkillDto): string {
+  return `<div class="row${s.level === 0 ? " zero" : ""}">
+    <span class="name" title="槽位 ${s.index}｜技能ID ${s.skillId ?? "?"}">${escapeHtml(
+      s.name ?? `（未命名技能 ${s.skillId ?? s.index}）`,
+    )}</span>
+    <input type="number" min="0" max="99" data-skill-index="${s.index}" value="${s.level}" />
+  </div>`;
+}
+
+/**
+ * 技能图标按**技能代码名**查（图标文件名就是 skills.txt 的 skill 列改成小写下划线）。
+ *
+ * 名字是本地化的，所以先用技能树名单里的英文名反查；拿不到就退化成文字。
+ */
+function iconCodeOf(s: SkillDto): string {
+  const english = skillsView?.englishNames?.[String(s.skillId ?? "")];
+  return english ? english.toLowerCase().replace(/[^a-z0-9]+/g, "") : "";
 }
 
 /**
@@ -393,19 +469,27 @@ function renderItemDetail(detail: ItemDetailDto) {
   $("#stat-count").textContent = String(detail.stats.length);
   const rows = detail.stats
     .map((s) => {
-      const stepNote =
-        s.step > 1
-          ? `<span class="muted">步长 ${s.step}</span>`
-          : s.hasParamBits
-            ? `<span class="muted">含参数</span>`
-            : "";
-      const nameCls = s.userVisible ? "" : " class=\"muted\"";
+      // 逐条属性各有自己的有效范围（来自 ItemStatCost 的位宽/偏移/移位），
+      // 直接显示出来并作为输入框的上下限，用户就不会填到会被截断的值。
+      const parts: string[] = [];
+      if (s.rangeText) parts.push(`有效范围 ${s.rangeText}`);
+      if (s.hasParamBits) parts.push("含参数位");
+      if (!s.userVisible) parts.push("内部字段");
+      const note = parts.length
+        ? `<span class="muted">${escapeHtml(parts.join("｜"))}</span>`
+        : "";
+      const nameCls = s.userVisible ? "" : ' class="muted"';
+      const bounds =
+        s.minValue !== null && s.maxValue !== null
+          ? ` min="${s.minValue}" max="${s.maxValue}"`
+          : "";
+      const stepAttr = s.step > 1 ? ` step="${s.step}"` : "";
       return `<tr>
         <td>${s.id}</td>
         <td${nameCls}>${s.name}${s.userVisible ? "" : " <span class='muted'>(内部字段)</span>"}</td>
         <td class="muted">${s.internal}</td>
-        <td><input type="number" class="cell-input" value="${s.value}" data-stat-id="${s.id}" data-stat-layer="${s.layer}" /></td>
-        <td>${stepNote}</td>
+        <td><input type="number" class="cell-input" value="${s.value}"${bounds}${stepAttr} data-stat-id="${s.id}" data-stat-layer="${s.layer}" /></td>
+        <td>${note}</td>
         <td><button class="mini danger" data-del-stat="${s.id}" data-del-layer="${s.layer}">删除</button></td>
       </tr>`;
     })
@@ -455,19 +539,61 @@ function collectDetailEdits(): ItemEdit[] {
   if (def !== null && def !== it.defense) edits.push({ kind: "setDefense", index, value: def });
 
   // 属性值
+  collectProblems.length = 0;
   document.querySelectorAll<HTMLInputElement>("input[data-stat-id]").forEach((el) => {
     const stat = Number(el.dataset.statId);
     const value = Number(el.value);
+    // 前端先按输入框上的 min/max/step 拦一道，给出**具体到哪条属性**的提示，
+    // 而不是等后端拒绝后只看到一句"ID 7 的值 100 存不进去"。
+    // 后端仍会再校验一次（前端只是让提示更好懂，不替代后端校验）。
+    const problem = statValueProblem(stat, value, el);
+    if (problem) collectProblems.push(problem);
     edits.push({ kind: "setStat", index, stat, value });
   });
   return edits;
 }
 
+/// 收集时发现的非法值（由调用方读取后提示；避免为它多加返回值）。
+const collectProblems: string[] = [];
+
+/**
+ * 检查一个属性值是否可表示；不可表示时返回可读原因。
+ *
+ * 规则与后端一致（存档写入时会右移 `ValShift` 位、值右移后为 0 会被整个跳过），
+ * 这里只是提前告诉用户，避免提交后才被拒。
+ */
+function statValueProblem(id: number, value: number, el: HTMLInputElement): string | null {
+  if (Number.isNaN(value)) return `属性 ID ${id} 的值不是数字`;
+  const min = el.min === "" ? null : Number(el.min);
+  const max = el.max === "" ? null : Number(el.max);
+  const step = el.step === "" ? 1 : Number(el.step);
+  if (step > 1 && value % step !== 0) {
+    return `属性 ID ${id} 的值 ${value} 存不进去：必须是 ${step} 的倍数（否则会被截断）`;
+  }
+  if (step > 1 && value <= 0) {
+    return `属性 ID ${id} 的值 ${value} 会让这条属性在写盘后消失（该属性按 ${step} 的精度存储）`;
+  }
+  if (min !== null && value < min) {
+    return `属性 ID ${id} 的值 ${value} 小于可表示的最小值 ${min}`;
+  }
+  if (max !== null && value > max) {
+    return `属性 ID ${id} 的值 ${value} 超过可表示的最大值 ${max}`;
+  }
+  return null;
+}
+
 /** 应用明细面板的改动 */
 async function applyDetailEdits() {
-  const edits = collectDetailEdits().filter(
-    (e) => e.kind !== "setStat" || true, // 属性值一律提交（后端幂等）
-  );
+  const edits = collectDetailEdits();
+  // 有不可表示的值就**先不提交**，把每条原因列出来：
+  // 这些值写进去会被静默截断，或者让整条属性消失，必须让用户先改对。
+  if (collectProblems.length > 0) {
+    $("#detail-result").innerHTML = collectProblems
+      .map((p) => `<div class="problem">${escapeHtml(p)}</div>`)
+      .join("");
+    showError(new Error(collectProblems[0]), `${collectProblems.length} 个属性值不可表示`);
+    return;
+  }
   if (edits.length === 0) {
     toast("没有需要应用的修改", "error");
     return;
@@ -475,6 +601,7 @@ async function applyDetailEdits() {
   try {
     const n = await call<number>("apply_item_edits", { edits, target: selectedTarget });
     pendingDetailEdits.length = 0;
+    $("#detail-result").textContent = "";
     toast(`已应用 ${n} 条修改。点「保存」才会写入文件。`);
     const keep = selectedItem;
     await loadAll();
@@ -521,6 +648,12 @@ async function loadAll() {
   const char = await call<CharacterDto>("character");
   fillCharacter(char);
   skills = await call<SkillDto[]>("skills");
+  // 技能树分组：后端给不出（老后端 / 未知职业）时留 null，界面退回平铺列表
+  try {
+    skillsView = await call<SkillsViewDto>("skills_view");
+  } catch {
+    skillsView = null;
+  }
   renderSkills();
   // 小站名要在渲染传送点之前拿到，否则只能显示编号
   if (waypointNames.length === 0) {
@@ -704,6 +837,7 @@ async function refreshLayout() {
     ($("#l-stash-rows") as HTMLInputElement).value = String(settings.stashRows);
     ($("#l-merc") as HTMLInputElement).checked = settings.mercFullEquipment;
     ($("#l-books") as HTMLInputElement).checked = settings.booksSingleCell;
+    ($("#l-cube-one") as HTMLInputElement).checked = settings.cubeSingleCell;
     // 记住布局并刷新容器网格：网格尺寸（背包/方块/箱子行列数）全部来自它。
     // 漏了赋值会让 renderContainerView 恒早退，容器视图根本不渲染。
     currentLayout = settings;
@@ -768,6 +902,7 @@ async function applyLayout() {
     stashRows: Number(($("#l-stash-rows") as HTMLInputElement).value),
     mercFullEquipment: ($("#l-merc") as HTMLInputElement).checked,
     booksSingleCell: ($("#l-books") as HTMLInputElement).checked,
+    cubeSingleCell: ($("#l-cube-one") as HTMLInputElement).checked,
     confirmedByUser: true,
   };
   try {
@@ -1072,10 +1207,6 @@ function bind() {
     }
   });
 
-  $("#show-all-skills").addEventListener("change", (ev) => {
-    showAllSkills = (ev.target as HTMLInputElement).checked;
-    renderSkills();
-  });
 
   $("#btn-apply-items").addEventListener("click", async () => {
     const edits = collectItemEdits();

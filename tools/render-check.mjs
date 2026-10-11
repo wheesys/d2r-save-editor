@@ -232,6 +232,18 @@ console.log("=== 6. 页面结构（吸顶靠结构保证，不能靠眼睛看）
   check("角色区块保留了表单子元素", html.includes('id="f-level"') && html.includes('id="f-strength"'));
   check("角色区块有容器存在", html.includes('id="skills"') && html.includes('id="inventory"'));
 
+  // 技能页要按游戏的三系技能树渲染（容器得在位，否则分组画不出来）
+  check(
+    "技能页有技能树容器",
+    html.includes('id="skills-head"') && html.includes('id="skills-unclassified"'),
+    "缺少 skills-head 或 skills-unclassified",
+  );
+  check(
+    "技能页不再用旧的「显示全部」开关",
+    !html.includes('id="show-all-skills"'),
+    "旧开关还在，但代码里已移除监听",
+  );
+
   // main.ts 里 `$("#xxx")` 引用的元素必须在 index.html 里存在。
   // 移动/重排区块时最容易漏掉某个 id，而这类问题只在运行时点开对应界面才暴露
   // （把设置从页签搬到弹窗时就差点漏掉）。

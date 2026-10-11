@@ -9,7 +9,8 @@ use d2r_data::{ItemNamer, SkillNamer, Strings, TableStore};
 
 use crate::dto::{
     AppError, CharacterDto, DatasetInfo, EditRequest, ItemDetailDto, ItemDto, ItemStatDto,
-    QuestDifficultyDto, QuestDto, SaveInfo, SaveResult, SkillDto, VerifyResult, WaypointsDto,
+    QuestDifficultyDto, QuestDto, SaveInfo, SaveResult, SkillDto, SkillTreeDto, SkillsViewDto,
+    VerifyResult, WaypointsDto,
 };
 
 /// 保存结果（内部形态，含是否备份）。
@@ -381,6 +382,126 @@ impl Workspace {
             .collect())
     }
 
+    /// 技能页视图：按游戏的**三系技能树**分组。
+    ///
+    /// 技能树的归属不在数据文件里，用 [`d2r_data::skilltree`] 里写死的名单。
+    /// 职业名来自存档（调试名如 `Sorceress`），要用 `PlayerClass.txt` 的
+    /// `Player Class → Code` 映射成 `sor` 这类代码才能查表。
+    ///
+    /// 未知职业（例如某 mod 的新职业）时 `trees` 为空，由界面退回平铺列表——
+    /// **不要瞎猜归属**，猜错会让人改错技能。
+    pub fn skills_view(&mut self) -> Result<SkillsViewDto, AppError> {
+        let all = self.skills()?;
+        let skill_points = self.character()?.skill_points;
+        let class_name = {
+            let session = self.session()?;
+            format!("{:?}", session.file.save.character.class)
+        };
+        let class_code = self.class_code_of(&class_name);
+
+        // 没有对应的树（未知职业）就把全部技能当"未归类"
+        let Some(trees) = class_code
+            .as_deref()
+            .and_then(d2r_data::skilltree::trees_for_class)
+        else {
+            return Ok(SkillsViewDto {
+                class_code: class_code.unwrap_or_default(),
+                trees: Vec::new(),
+                unclassified: all,
+                skill_points,
+                english_names: self.skill_id_to_name(),
+            });
+        };
+
+        // 建立"技能 ID → (树, 树内序号)"。
+        //
+        // **必须按 ID 匹配**：技能树名单里是英文技能名（`skills.txt` 的 `skill` 列），
+        // 而 `self.skills()` 给出的 `name` 是**已本地化的**名字（"火焰弹"），
+        // 直接按名字比会全部对不上（踩过：30 个技能全被判为"未归类"）。
+        let ids = self.skill_name_to_id();
+        let mut by_id: std::collections::HashMap<u16, (usize, usize)> =
+            std::collections::HashMap::new();
+        for (ti, tree) in trees.iter().enumerate() {
+            for (si, name) in tree.skills.iter().enumerate() {
+                if let Some(&id) = ids.get(*name) {
+                    by_id.insert(id, (ti, si));
+                }
+            }
+        }
+
+        // 按树内序号摆放，空位补 `None`，这样界面能按游戏那样留出空格
+        let mut grouped: Vec<Vec<Option<SkillDto>>> =
+            trees.iter().map(|t| vec![None; t.skills.len()]).collect();
+        let mut unclassified = Vec::new();
+        for mut dto in all {
+            match dto.skill_id.and_then(|id| by_id.get(&id).copied()) {
+                Some((ti, si)) => {
+                    // 名字没解析出来时用技能树名单里的英文名兜底：
+                    // 至少让用户看出这是哪个技能，而不是"（未解析）"。
+                    if dto.name.is_none() {
+                        dto.name = Some(trees[ti].skills[si].to_string());
+                    }
+                    grouped[ti][si] = Some(dto);
+                }
+                None => unclassified.push(dto),
+            }
+        }
+
+        Ok(SkillsViewDto {
+            class_code: class_code.unwrap_or_default(),
+            trees: trees
+                .iter()
+                .zip(grouped)
+                .map(|(tree, skills)| SkillTreeDto {
+                    name: tree_name_zh(tree.name).to_string(),
+                    skills: skills.into_iter().flatten().collect(),
+                })
+                .collect(),
+            unclassified,
+            skill_points,
+            english_names: self.skill_id_to_name(),
+        })
+    }
+
+    /// 技能 ID → 英文技能名（供界面按名字找图标）。
+    fn skill_id_to_name(&mut self) -> std::collections::HashMap<String, String> {
+        self.skill_name_to_id()
+            .into_iter()
+            .map(|(name, id)| (id.to_string(), name))
+            .collect()
+    }
+
+    /// 技能名（`skills.txt` 的 `skill` 列英文值）→ 技能 ID。
+    ///
+    /// **直接用表里的 `skill` 列**，不要用解析出来的显示名：显示名是本地化的
+    /// （`Fire Bolt` → "火焰弹"），而技能树名单里是英文名，两者永远匹配不上
+    /// ——踩过这个坑，表现为 30 个技能全部被判为"未归类"。
+    /// 用 `skill` 列还有个好处：与界面语言无关。
+    fn skill_name_to_id(&mut self) -> std::collections::HashMap<String, u16> {
+        let Some(table) = self.tables.get("skills") else {
+            return std::collections::HashMap::new();
+        };
+        let mut out = std::collections::HashMap::new();
+        for row in 0..table.len() {
+            let (Some(name), Some(id)) = (table.cell_nonempty(row, "skill"), table.int(row, "*Id"))
+            else {
+                continue;
+            };
+            if id >= 0 {
+                out.insert(name.to_string(), id as u16);
+            }
+        }
+        out
+    }
+
+    /// 把职业调试名（`Sorceress`）换成 `PlayerClass.txt` 里的代码（`sor`）。
+    fn class_code_of(&mut self, class_name: &str) -> Option<String> {
+        let table = self.tables.get("PlayerClass")?;
+        let row = table.find_row_by("Player Class", class_name)?;
+        let code = table.cell_nonempty(row, "Code")?;
+        Some(code.to_string())
+    }
+
     /// 传送点状态。
     pub fn waypoints(&self) -> Result<Vec<WaypointsDto>, AppError> {
         let raw = self.session()?.waypoints();
@@ -631,6 +752,9 @@ impl Workspace {
             .iter()
             .map(|(id, value, layer)| {
                 let info = self.stat_namer.get(*id);
+                // 逐条属性各有自己的有效范围（ItemStatCost 的位宽/偏移/移位），
+                // 界面要把它显示出来，用户才知道能填多少。
+                let limit = self.stat_limits.get(*id);
                 ItemStatDto {
                     id: *id,
                     layer: *layer,
@@ -640,6 +764,9 @@ impl Workspace {
                     step: info.map(|s| s.step).unwrap_or(1),
                     has_param_bits: info.map(|s| s.has_param_bits).unwrap_or(false),
                     user_visible: info.map(|s| s.user_visible).unwrap_or(false),
+                    min_value: limit.map(|l| l.min()),
+                    max_value: limit.map(|l| l.max()),
+                    range_text: limit.map(|l| l.range_text()),
                 }
             })
             .collect();
@@ -687,16 +814,30 @@ impl Workspace {
     }
 
     /// 按目标应用物品改动。
+    ///
+    /// 改属性值前**逐条按自己的规格校验**（`ItemStatCost` 的位宽/偏移/移位）：
+    /// 不同属性的有效值完全不同（`strength` 是 -32–223，`maxhp` 是 256–122624
+    /// 且必须是 256 的倍数，`item_allskills` 只有 0–7）。不校验的话，
+    /// 会被 d2s 静默截断、甚至让整条属性写盘后消失。
+    ///
+    /// 校验分两步，与不带目标的 [`Self::apply_item_edits`] 完全一致：
+    /// 1. `check_item_edits` 预检范围（能提前拦住明显超范围的值）；
+    /// 2. 应用后 `verify_item_values` 读回来比对——属性按位存储，
+    ///    超出位宽会**静默截断**，写进去的和读出来的不一致就回滚报错。
     pub fn apply_item_edits_on(
         &mut self,
         target: d2r_core::ItemTarget,
         edits: &[d2r_core::ItemEdit],
     ) -> Result<usize, AppError> {
-        let count = edits.len();
+        self.check_item_edits(edits)?;
         self.session_mut()?
             .apply_items_on(target, edits)
             .map_err(|e| AppError::invalid(e.to_string()))?;
-        Ok(count)
+        if let Err(e) = self.verify_item_values(edits) {
+            self.discard_item_edits();
+            return Err(e);
+        }
+        Ok(edits.len())
     }
 
     /// 佣兵装备段里的物品。
@@ -958,5 +1099,47 @@ impl Workspace {
             .clone()
             .ok_or_else(|| AppError::new("state", "没有源路径"))?;
         self.open(path)
+    }
+}
+
+/// 技能树名的中文（按游戏界面用词）。
+///
+/// 这些名字**不在字符串表里**——游戏界面上确实显示它们，但字符串存在界面代码
+/// 里而不是数据表里（查过 `ui.json`/`skills.json` 都没有）。所以只能写死。
+/// 认不出来时原样返回英文，至少不会显示成空白。
+fn tree_name_zh(english: &str) -> &str {
+    match english {
+        // 法师
+        "Fire Spells" => "火系",
+        "Cold Spells" => "冰系",
+        "Lightning Spells" => "电系",
+        // 亚马逊
+        "Bow and Crossbow" => "弓与弩",
+        "Passive and Magic" => "被动与魔法",
+        "Javelin and Spear" => "标枪与长矛",
+        // 死灵法师
+        "Summoning Skills" => "召唤",
+        "Poison and Bone" => "毒素与白骨",
+        "Curses" => "诅咒",
+        // 圣骑士
+        "Combat Skills" => "作战技能",
+        "Offensive Auras" => "攻击灵气",
+        "Defensive Auras" => "防御灵气",
+        // 野蛮人
+        "Combat Masteries" => "战斗专精",
+        "Warcries" => "战吼",
+        // 德鲁伊
+        "Elemental" => "元素",
+        "Shape Shifting" => "变形",
+        "Summoning" => "召唤",
+        // 刺客
+        "Martial Arts" => "武艺",
+        "Traps" => "陷阱",
+        "Shadow Disciplines" => "影子训练",
+        // 某个 mod 自创职业（术士）；原版没有对应资料，按数据顺序切的三组
+        "Summoning and Blood" => "召唤与血祭",
+        "Hexes and Combat" => "咒术与战技",
+        "Sigils and Elements" => "印记与元素",
+        other => other,
     }
 }

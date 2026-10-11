@@ -53,6 +53,7 @@ pub fn run() {
             commands::is_dirty,
             commands::character,
             commands::skills,
+            commands::skills_view,
             commands::waypoints,
             commands::item_details,
             commands::item_stats,

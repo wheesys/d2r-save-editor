@@ -18,6 +18,7 @@ pub mod itemname;
 pub mod placement;
 pub mod questname;
 pub mod skillname;
+pub mod skilltree;
 pub mod statlimit;
 pub mod statname;
 pub mod strings;

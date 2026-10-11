@@ -7,7 +7,7 @@ use std::sync::Mutex;
 
 use d2r_app::{
     AppError, CharacterDto, DatasetInfo, ItemDto, QuestDifficultyDto, SaveInfo, SaveResult,
-    SkillDto, VerifyResult, WaypointsDto, Workspace,
+    SkillDto, SkillsViewDto, VerifyResult, WaypointsDto, Workspace,
 };
 use tauri::State;
 
@@ -40,10 +40,16 @@ pub fn character(state: State<'_, AppState>) -> R<CharacterDto> {
     state.0.lock().unwrap().character()
 }
 
-/// 技能列表。
+/// 技能列表（平铺，不带技能树分组）。
 #[tauri::command]
 pub fn skills(state: State<'_, AppState>) -> R<Vec<SkillDto>> {
     state.0.lock().unwrap().skills()
+}
+
+/// 技能页视图：按游戏的**三系技能树**分组（含未归类的技能）。
+#[tauri::command]
+pub fn skills_view(state: State<'_, AppState>) -> R<SkillsViewDto> {
+    state.0.lock().unwrap().skills_view()
 }
 
 /// 传送点状态。

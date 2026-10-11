@@ -93,6 +93,7 @@ fn user_confirmed_layout_makes_bounds_reliable() {
     let (ix, iy) = hints.inventory_max.unwrap_or((9, 3));
     let fitted = LayoutSettings {
         books_single_cell: false,
+        cube_single_cell: false,
         // 留足余量（推断只给下限）：按最大坐标 + 1 再加一点
         inventory_cols: ix + 2,
         inventory_rows: iy + 2,

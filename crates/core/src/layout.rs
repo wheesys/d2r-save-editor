@@ -39,6 +39,10 @@ pub struct LayoutSettings {
     /// 但**不改存档里的坐标数据**——那两件物品在存档里的位置语义不变，
     /// 只是编辑器把它们当成 1 格来摆放与判越界。
     pub books_single_cell: bool,
+    /// 合成盒（赫拉迪克方块）是否只占一格（mod 常见改动：原版是 2×2）。
+    ///
+    /// 与书同理：只影响界面的占格与拖拽落点，不动存档数据。
+    pub cube_single_cell: bool,
     /// 每个设置是否由用户显式指定（`false` 表示用的默认/推断值）。
     pub confirmed_by_user: bool,
 }
@@ -55,6 +59,7 @@ impl Default for LayoutSettings {
             stash_rows: 10,
             merc_full_equipment: false,
             books_single_cell: false,
+            cube_single_cell: false,
             confirmed_by_user: false,
         }
     }
@@ -65,16 +70,21 @@ impl Default for LayoutSettings {
 /// 只列传送书与鉴定书：卷轴（`tsc`/`isc`）本来就是 1×1，不需要处理。
 pub const BOOK_CODES: [&str; 2] = ["tbk", "ibk"];
 
+/// 合成盒的物品代码。
+pub const CUBE_CODES: [&str; 1] = ["box"];
+
 impl LayoutSettings {
-    /// 某物品在界面上的占格（考虑"书只占一格"的设置）。
+    /// 某物品在界面上的占格（考虑"书/合成盒只占一格"这类 mod 设置）。
     ///
-    /// `base` 是从数据表读到的原始占格；命中书且开关打开时返回 1×1。
+    /// `base` 是从数据表读到的原始占格；命中被改小的物品时返回 1×1。
     pub fn item_size(&self, code: &str, base: (u32, u32)) -> (u32, u32) {
         if self.books_single_cell && BOOK_CODES.contains(&code) {
-            (1, 1)
-        } else {
-            base
+            return (1, 1);
         }
+        if self.cube_single_cell && CUBE_CODES.contains(&code) {
+            return (1, 1);
+        }
+        base
     }
 }
 

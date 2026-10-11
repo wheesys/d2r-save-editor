@@ -92,9 +92,11 @@ const EQUIP_SLOT_LAYOUT: {
   { key: "RightHand", label: "右手", x: 415 - 320, y: 180, w: 23, h: 24 },
   // 左手（副手）529,180 / 23×24
   { key: "LeftHand", label: "左手", x: 529 - 320, y: 180, w: 23, h: 24 },
-  // 戒指：布局表里没有坐标，按与双手对称的位置估
-  { key: "RightRing", label: "右戒", x: 390 - 320, y: 145, w: 23, h: 24, estimated: true },
-  { key: "LeftRing", label: "左戒", x: 555 - 320, y: 145, w: 23, h: 24, estimated: true },
+  // 戒指：布局表里**没有**这两个槽（游戏把它们写在界面代码里），所以位置是估的。
+  // 依据社区对装备页的描述：中央是腰带，**腰带两侧的两个小格就是戒指**，
+  // 所以紧贴腰带左右各放一个格子（原先放在手臂下方是错的）。
+  { key: "RightRing", label: "右戒", x: 430 - 320, y: 179, w: 23, h: 24, estimated: true },
+  { key: "LeftRing", label: "左戒", x: 511 - 320, y: 179, w: 23, h: 24, estimated: true },
 ];
 
 /**

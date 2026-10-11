@@ -149,6 +149,8 @@ export interface LayoutSettings {
   mercFullEquipment: boolean;
   /** 传送书/鉴定书只占一格（mod 改动；开启后渲染与拖拽都按 1×1） */
   booksSingleCell: boolean;
+  /** 合成盒只占一格（mod 改动；开启后渲染与拖拽都按 1×1） */
+  cubeSingleCell: boolean;
   confirmedByUser: boolean;
 }
 
@@ -180,6 +182,12 @@ export interface ItemStatDto {
   step: number;
   hasParamBits: boolean;
   userVisible: boolean;
+  /** 可表示的最小值（逐条属性各不相同；查不到规格时为 null） */
+  minValue: number | null;
+  /** 可表示的最大值 */
+  maxValue: number | null;
+  /** 范围的可读文本，如 `0–130816（步长 256）` */
+  rangeText: string | null;
 }
 
 export interface ItemDetailDto {
@@ -227,4 +235,18 @@ export interface QuestDifficultyDto {
   difficultyIndex: number;
   /** [幕][槽] */
   acts: QuestDto[][];
+}
+/** 技能树（后端的 SkillsViewDto）。 */
+export interface SkillTreeDto {
+  name: string;
+  skills: SkillDto[];
+}
+
+export interface SkillsViewDto {
+  classCode: string;
+  trees: SkillTreeDto[];
+  unclassified: SkillDto[];
+  skillPoints: number;
+  /** 技能 ID → 英文技能名（按名字找图标用） */
+  englishNames: Record<string, string>;
 }

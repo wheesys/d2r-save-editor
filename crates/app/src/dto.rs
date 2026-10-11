@@ -95,6 +95,36 @@ pub struct SkillDto {
     pub level: u8,
 }
 
+/// 一棵技能树（含树内技能），供技能页按游戏样式显示。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillTreeDto {
+    /// 树名（中文，按职业查内置对照表）。
+    pub name: String,
+    /// 该树的技能，顺序即游戏里的排列顺序。
+    pub skills: Vec<SkillDto>,
+}
+
+/// 技能页视图：按游戏的"三系技能树"分组。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsViewDto {
+    /// 职业代码（`PlayerClass.txt` 的 `Code`，如 `sor`；读不到时为空）。
+    pub class_code: String,
+    /// 三棵树。职业未知时为**空表**（此时界面退回平铺列表，不要瞎猜归属）。
+    pub trees: Vec<SkillTreeDto>,
+    /// 未被归类的技能（正常情况下应为空；不为空时界面会照样列出来，
+    /// 免得某个技能因为表写漏了而完全无法编辑）。
+    pub unclassified: Vec<SkillDto>,
+    /// 未分配技能点。
+    pub skill_points: i64,
+    /// 技能 ID → 英文技能名（`skills.txt` 的 `skill` 列）。
+    ///
+    /// 用途是按名字找图标：界面上的技能名是本地化的（"火焰弹"），
+    /// 而图标是按英文名命名的。
+    pub english_names: std::collections::HashMap<String, String>,
+}
+
 /// 传送点视图。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -206,6 +236,15 @@ pub struct ItemStatDto {
     pub has_param_bits: bool,
     /// 游戏是否会为它生成描述（`false` = 内部字段）。
     pub user_visible: bool,
+    /// 可表示的最小值（游戏值）。查不到属性规格时为 `None`。
+    ///
+    /// 逐条属性各不相同：`strength` 是 -32，`maxhp` 是 256（0 会被写侧跳过），
+    /// `item_allskills` 是 0。
+    pub min_value: Option<i64>,
+    /// 可表示的最大值（游戏值）。
+    pub max_value: Option<i64>,
+    /// 范围的可读文本，例如 `0–130816（步长 256）`。
+    pub range_text: Option<String>,
 }
 
 /// 一件物品的完整明细（界面的物品编辑面板用）。
