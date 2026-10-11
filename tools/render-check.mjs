@@ -12,6 +12,7 @@
  */
 
 import { buildGrids, renderInventory, setItemIcons } from "../web/src/inventory.ts";
+import { STAT_TABLE_HEAD, renderStatRow } from "../web/src/statrow.ts";
 
 /** 构造一件物品（字段与后端 ItemDto 对齐） */
 function item(overrides) {
@@ -264,6 +265,60 @@ console.log("=== 6. 页面结构（吸顶靠结构保证，不能靠眼睛看）
     absent.length === 0,
     `缺失: ${absent.join(", ")}`,
   );
+}
+
+console.log("=== 6. 属性行：值1 必须真的渲染出来 ===");
+{
+  // 这段路径出过很难查的 bug：界面上"值"整列空白，而模板产出、单测、
+  // 真实 DOM 复现全对。所以这里直接断言**渲染结果里有值**，
+  // 而不是只看代码写没写。
+  const plain = {
+    id: 27,
+    layer: 0,
+    value: 255,
+    name: "法力回复",
+    userVisible: true,
+    rangeText: "0–255",
+    minValue: 0,
+    maxValue: 255,
+    displayStep: 1,
+    hasLayer: false,
+    paramOptions: [],
+  };
+  const row = renderStatRow(plain);
+  check("值1 带上了 value 属性", row.includes('value="255"'), row);
+  check("值1 是文本输入框（避开 number 的空白渲染）", row.includes('type="text"'));
+  check("值1 带上属性 ID 与参数", row.includes('data-stat-id="27"') && row.includes('data-stat-layer="0"'));
+  check("普通属性没有值2", !row.includes("data-stat-layer-sel"));
+  check("值都是数字，没有 undefined/NaN", !/undefined|NaN/.test(row), row);
+
+  // 带参数位：值2 应给出可选值（用户直接选"法师"）
+  const layered = {
+    ...plain,
+    id: 83,
+    layer: 1,
+    value: 7,
+    name: "法师技能等级",
+    hasLayer: true,
+    paramLabel: "法师 技能等级 +7",
+    paramOptions: [
+      { layer: 0, label: "亚马逊" },
+      { layer: 1, label: "法师" },
+    ],
+  };
+  const lrow = renderStatRow(layered);
+  check("带参数属性有值2 下拉框", lrow.includes("data-stat-layer-sel=\"83\""));
+  check("值2 选中当前项", lrow.includes('value="1" selected'), lrow);
+  check("值2 列出可选值", lrow.includes("法师") && lrow.includes("亚马逊"));
+  check("值1 仍然渲染", lrow.includes('value="7"'));
+
+  // 值为 0 也必须显示成 "0"（不能被当成空）
+  const zero = renderStatRow({ ...plain, id: 7, value: 0, name: "生命" });
+  check("值为 0 时显示 0 而不是空白", zero.includes('value="0"'), zero);
+
+  // 表头列名：内部名列已去掉，两个值列叫 值1 / 值2
+  check("表头是 值1 / 值2", STAT_TABLE_HEAD.includes("<th>值1</th>") && STAT_TABLE_HEAD.includes("<th>值2</th>"));
+  check("表头不再有「内部名」列", !STAT_TABLE_HEAD.includes("内部名"));
 }
 
 console.log("");

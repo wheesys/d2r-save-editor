@@ -8,6 +8,7 @@ import {
   renderMercDoll,
   setItemIcons,
 } from "./inventory";
+import { STAT_TABLE_HEAD, renderStatRow, statValueText } from "./statrow";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import {
@@ -445,22 +446,6 @@ function closeItemModal() {
   pendingDetailEdits.length = 0;
 }
 
-/**
- * 属性值在输入框里显示成什么文本。
- *
- * 走多路兜底：正常用 `value`（存档里的整数）；万一某个字段缺失，
- * 退到 `displayValue`，再不行给个空串。
- *
- * 为什么要兜底：曾经出现过"整列空白"，而原因是取了一个不存在的字段
- * （`undefined` 渲染成空）。多一层兜底至少能立刻看出是数据问题还是渲染问题。
- */
-function statValueText(s: ItemStatDto): string {
-  if (typeof s.value === "number" && Number.isFinite(s.value)) return String(s.value);
-  const dv = (s as unknown as { displayValue?: unknown }).displayValue;
-  if (typeof dv === "number" && Number.isFinite(dv)) return String(dv);
-  return "";
-}
-
 /** 当前弹窗里展示的属性（收集改动时用来判断"有没有真的变"）。 */
 let detailStats: ItemStatDto[] = [];
 
@@ -488,87 +473,25 @@ function renderItemDetail(detail: ItemDetailDto) {
   setNum("#d-defense", it.defense, it.defense !== null, 65535);
 
   $("#stat-count").textContent = String(detail.stats.length);
-  const rows = detail.stats
-    .map((s) => {
-      // 逐条属性各有自己的有效范围（来自 ItemStatCost 的位宽/偏移/移位），
-      // 直接显示出来并作为输入框的上下限，用户就不会填到会被截断的值。
-      const parts: string[] = [];
-      // 「按等级加成」要标出来，否则用户不知道这条属性在游戏里会随等级变化。
-      // **不给"每级 +X"**：这里的值是存档里的原始数（可能还含 1/256 精度），
-      // 说成"每级"会算错（用户明确要求按数据大小处理）。
-      if (s.perLevel) {
-        parts.push("按等级加成（游戏内按 值 × 等级 / 8 生效）");
-      }
-      if (s.rangeText) parts.push(`有效范围 ${s.rangeText}`);
-      // 带参数位的属性有**两个变量**：数值 + 层。两个都要展示，
-      // 否则同一件物品上会出现两行看起来一样的属性（层不同、数值相同），
-      // 用户无法区分（用户实际提过这个问题）。
-      if (s.hasLayer) {
-        parts.push(`层 ${s.layer}`);
-      }
-      // 参数含义（如"获得 31 级「狂热」光环"、"法师 技能等级 +7"）
-      if (s.paramLabel) parts.push(s.paramLabel);
-      if (!s.userVisible) parts.push("内部字段");
-      const note = parts.length
-        ? `<span class="muted">${escapeHtml(parts.join("｜"))}</span>`
-        : "";
-      const nameCls = s.userVisible ? "" : ' class="muted"';
-      // 输入框是**存档里的值**，上下限/步长也用它，保持同一口径。
-      //
-      // 用 `type="text"` 而不是 `type="number"`：`number` 在 value 与
-      // step/min 不匹配时，Chromium 会**把输入框画成空白**（值只在 DOM 属性里），
-      // 看起来就像"值没显示"。范围校验由我们自己的
-      // `statValueProblem()` + 后端两处负责，不依赖浏览器。
-      //
-      // 取值走 `statValueText()`：万一某个字段缺失也不会渲染成空白，
-      // 至少能看到一个能对上的数字（排查时吃过"整列空白"的亏）。
-      const hint =
-        s.minValue !== null && s.maxValue !== null
-          ? `范围 ${s.minValue} ~ ${s.maxValue}`
-          : "";
-      // 层的单元格：有已知可选值时渲染成 `<select>`（用户直接选"法师"），
-      // 否则退化成只读文本显示层号。
-      const layerCell =
-        s.paramOptions.length > 0
-          ? `<select class="cell-select" data-stat-layer-sel="${s.id}"
-               data-stat-layer-cur="${s.layer}">${s.paramOptions
-               .map(
-                 (o) =>
-                   `<option value="${o.layer}"${o.layer === s.layer ? " selected" : ""}>${escapeHtml(o.label)}</option>`,
-               )
-               .join("")}</select>`
-          : s.hasLayer
-            ? `<span class="muted">${s.layer}</span>`
-            : "";
-      return `<tr>
-        <td>${s.id}</td>
-        <td${nameCls}>${s.name}${s.userVisible ? "" : " <span class='muted'>(内部字段)</span>"}</td>
-        <td class="muted">${s.internal}</td>
-        <td><input type="text" inputmode="numeric" class="cell-input"
-          data-stat-id="${s.id}" data-stat-layer="${s.layer}"
-          data-min="${s.minValue ?? ""}" data-max="${s.maxValue ?? ""}"
-          data-step="${s.displayStep}" title="${escapeAttr(hint)}" /></td>
-        <td>${layerCell}</td>
-        <td>${note}</td>
-        <td><button class="mini danger" data-del-stat="${s.id}" data-del-layer="${s.layer}">删除</button></td>
-      </tr>`;
-    })
-    .join("");
-  $("#item-stats").innerHTML =
-    `<thead><tr><th>ID</th><th>属性</th><th>内部名</th><th>值</th><th>层</th><th>说明</th><th></th></tr></thead>` +
-    `<tbody>${rows}</tbody>`;
+  // 行的渲染在 `statrow.ts` 里（纯函数、无 DOM 依赖）。
+  // 抽出去是为了让 `tools/render-check.mjs` 能在**不开窗口**时断言
+  // "每条属性都带上了值"，这条路径出过很难查的"整列空白"。
+  const rows = detail.stats.map((s) => renderStatRow(s)).join("");
+  // 内部名列已去掉：内部名是排查用的，对用户没意义，占地方还挤窄了别的列。
+  // 两个值列统一叫 **值1 / 值2**（跟游戏里一样，用户只看数值，
+  // 含义由"说明"列讲清楚），不出现"层"这种内部术语。
+  $("#item-stats").innerHTML = STAT_TABLE_HEAD + `<tbody>${rows}</tbody>`;
 
-  // **值的写入放到 innerHTML 之后显式赋值**，不走 HTML 属性。
+  // 值再用显式赋值兜一道。
   //
-  // 之前是 `value="${...}"` 拼进字符串，出现过"整列空白"：
-  // 属性字符串里只要有一个字符让浏览器解析异常，值就丢了，
-  // 而且编译器与模板测试都发现不了（模板产出是对的）。
-  // 显式赋值只经过 DOM 属性一条路径，渲染一定与数据一致。
+  // `renderStatRow` 已经把值写进 `value` 属性（浏览器解析 HTML 时同步建立，
+  // 不依赖脚本执行）；这里再赋一次，兜住属性解析异常的情况。
+  // 两条路径任一条可用，值就不会空白。
   document.querySelectorAll<HTMLInputElement>("input[data-stat-id]").forEach((el) => {
     const stat = detail.stats.find(
       (s) => s.id === Number(el.dataset.statId) && s.layer === Number(el.dataset.statLayer),
     );
-    el.value = stat ? statValueText(stat) : "";
+    if (stat) el.value = statValueText(stat);
   });
 
   // 删除属性按钮
@@ -731,14 +654,15 @@ function collectDetailEdits(): ItemEdit[] {
     edits.push({ kind: "setStat", index, stat, value, layer });
   });
 
-  // 层（参数）改动：把当前选择与原始层比较，不同才发
-  document.querySelectorAll<HTMLSelectElement>("select[data-stat-layer-sel]").forEach((el) => {
+  // 值2 的改动：与原始值比较，不同才发。
+  // 下拉框（有已知可选值）和数字输入框（没有）都走这里。
+  document.querySelectorAll<HTMLElement>("[data-stat-layer-sel]").forEach((el) => {
     const stat = Number(el.dataset.statLayerSel);
     const current = Number(el.dataset.statLayerCur);
-    const next = Number(el.value);
+    const next = Number((el as HTMLInputElement | HTMLSelectElement).value);
     if (Number.isNaN(next) || next === current) return;
     const original = originalOf(stat, current);
-    // 层的改动本质是"把这条属性挪到另一个层"，值保持不变
+    // 值2 的改动本质是"把这条属性挪到另一个参数上"，值1 保持不变
     edits.push({
       kind: "setStat",
       index,
