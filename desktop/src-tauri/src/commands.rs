@@ -96,9 +96,17 @@ pub fn item_stats(state: State<'_, AppState>) -> R<d2r_core::ItemStats> {
 }
 
 /// 应用一批物品修改（不落盘）。
+///
+/// `target` 不传时作用于主物品列表；佣兵段与主列表**序号体系不同**，
+/// 所以界面编辑佣兵物品时必须显式传 `Mercenary`，否则会改错物品。
 #[tauri::command]
-pub fn apply_item_edits(state: State<'_, AppState>, edits: Vec<d2r_app::ItemEditRequest>) -> R<usize> {
-    state.0.lock().unwrap().apply_item_edits(&edits)
+pub fn apply_item_edits(
+    state: State<'_, AppState>,
+    edits: Vec<d2r_app::ItemEditRequest>,
+    target: Option<d2r_core::ItemTarget>,
+) -> R<usize> {
+    let target = target.unwrap_or_default();
+    state.0.lock().unwrap().apply_item_edits_on(target, &edits)
 }
 
 /// 内置数据包信息（界面显示"数据来源"）。
@@ -137,8 +145,13 @@ pub fn validate_bounds(state: State<'_, AppState>) -> R<Vec<d2r_core::BoundsIssu
 }
 /// 一件物品的完整明细（含带名字的属性列表）。
 #[tauri::command]
-pub fn item_detail(state: State<'_, AppState>, index: usize) -> R<d2r_app::ItemDetailDto> {
-    state.0.lock().unwrap().item_detail_dto(index)
+pub fn item_detail(
+    state: State<'_, AppState>,
+    index: usize,
+    target: Option<d2r_core::ItemTarget>,
+) -> R<d2r_app::ItemDetailDto> {
+    let target = target.unwrap_or_default();
+    state.0.lock().unwrap().item_detail_dto_on(target, index)
 }
 
 /// 属性目录（界面做"添加属性"下拉用）。`all = true` 时含内部字段。
@@ -191,10 +204,10 @@ pub fn item_icons() -> Vec<(String, String)> {
 pub fn waypoint_names(state: State<'_, AppState>) -> Vec<String> {
     state.0.lock().unwrap().waypoint_names()
 }
-/// 佣兵装备段里的物品。
+/// 佣兵装备段里的物品（含完整明细，界面直接复用物品属性弹窗）。
 #[tauri::command]
-pub fn mercenary_items(state: State<'_, AppState>) -> R<Vec<d2r_core::MercenaryItem>> {
-    state.0.lock().unwrap().mercenary_items()
+pub fn mercenary_items(state: State<'_, AppState>) -> R<Vec<d2r_app::ItemDetailDto>> {
+    state.0.lock().unwrap().mercenary_item_details()
 }
 /// 任务视图（每个难度 → 各幕 → 各槽）。
 #[tauri::command]

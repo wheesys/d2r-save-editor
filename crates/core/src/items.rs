@@ -256,6 +256,12 @@ pub struct MercenaryItem {
     pub socket_count: usize,
     /// 已镶嵌数。
     pub socketed_count: usize,
+    /// 当前耐久。
+    pub durability: Option<i32>,
+    /// 最大耐久。
+    pub max_durability: Option<i32>,
+    /// 堆叠数量。
+    pub quantity: Option<i32>,
     /// 属性列表。
     pub stats: Vec<(u16, i64, i32)>,
 }
@@ -318,14 +324,20 @@ impl EditSession {
         self.file.save.items.len()
     }
 
-    /// 取某个物品的明细。
+    /// 取某个物品的明细（主物品列表）。
     pub fn item_detail(&self, index: usize) -> Result<ItemDetail, EditError> {
-        let item = self.file.save.items.get(index).ok_or_else(|| {
-            EditError::Invalid(format!(
-                "物品序号 {index} 越界（共 {} 件）",
-                self.item_count()
-            ))
-        })?;
+        self.item_detail_on(ItemTarget::Inventory, index)
+    }
+
+    /// 取某件物品的明细（可指定列表）。
+    ///
+    /// 佣兵段与主列表序号体系不同，所以界面按佣兵序号取明细时必须带目标。
+    pub fn item_detail_on(
+        &self,
+        target: ItemTarget,
+        index: usize,
+    ) -> Result<ItemDetail, EditError> {
+        let item = self.item_on(target, index)?;
         let p: &ItemPosition = &item.position;
         Ok(ItemDetail {
             index,
@@ -407,12 +419,26 @@ impl EditSession {
                 stats_count: it.stats.len(),
                 socket_count: it.sockets.len(),
                 socketed_count: it.sockets.iter().filter(|s| s.is_some()).count(),
+                durability: it.durability,
+                max_durability: it.max_durability,
+                quantity: it.quantity,
                 stats: it
                     .stats
                     .iter()
                     .map(|s| (s.id.0, s.value, s.layer))
                     .collect(),
             })
+            .collect()
+    }
+
+    /// 佣兵物品的完整明细（序号是佣兵段内的序号）。
+    ///
+    /// 界面按佣兵序号打开属性弹窗时用它——**不能**拿主列表的 `item_details()`
+    /// 里的序号去查佣兵段，两边序号体系不同。
+    pub fn mercenary_item_details(&self) -> Vec<ItemDetail> {
+        let total = self.mercenary_items().len();
+        (0..total)
+            .filter_map(|i| self.item_detail_on(ItemTarget::Mercenary, i).ok())
             .collect()
     }
 
@@ -527,18 +553,27 @@ impl EditSession {
         (issues, checked)
     }
 
-    /// 应用一条物品改动。
+    /// 应用一条物品改动（作用于主物品列表）。
+    ///
+    /// 佣兵段要用 [`Self::apply_item_on`]：两处序号体系不同，必须显式给目标。
     pub fn apply_item(&mut self, edit: ItemEdit) -> Result<(), EditError> {
+        self.apply_item_on(ItemTarget::Inventory, edit)
+    }
+
+    /// 对**指定列表**施加一条物品指令。
+    ///
+    /// 记录改动时会带上目标，撤销/重放才不会串到另一个列表。
+    pub fn apply_item_on(&mut self, target: ItemTarget, edit: ItemEdit) -> Result<(), EditError> {
         // 先做所有校验，再改动（避免半途失败留下半成品）
         match &edit {
             ItemEdit::SetDurability { index, value } => {
-                let max = self.item(*index)?.max_durability.unwrap_or(0);
+                let max = self.item_on(target, *index)?.max_durability.unwrap_or(0);
                 if *value < 0 || (max > 0 && *value > max) {
                     return Err(EditError::Invalid(format!(
                         "耐久必须在 0–{max} 之间（收到 {value}）"
                     )));
                 }
-                self.item_mut(*index)?.durability = Some(*value);
+                self.item_mut_on(target, *index)?.durability = Some(*value);
             }
             ItemEdit::SetQuantity { index, value } => {
                 if *value < 1 || *value > 511 {
@@ -546,7 +581,7 @@ impl EditSession {
                         "堆叠数量必须在 1–511（收到 {value}）"
                     )));
                 }
-                self.item_mut(*index)?.quantity = Some(*value);
+                self.item_mut_on(target, *index)?.quantity = Some(*value);
             }
             ItemEdit::SetDefense { index, value } => {
                 if *value < 0 || *value > 65535 {
@@ -554,7 +589,7 @@ impl EditSession {
                         "防御值必须在 0–65535（收到 {value}）"
                     )));
                 }
-                self.item_mut(*index)?.defense = Some(*value);
+                self.item_mut_on(target, *index)?.defense = Some(*value);
             }
             ItemEdit::SetSockets { index, count } => {
                 if *count > MAX_SOCKETS {
@@ -562,7 +597,7 @@ impl EditSession {
                         "孔数最多 {MAX_SOCKETS}（存档里是 3 位字段），收到 {count}"
                     )));
                 }
-                let item = self.item_mut(*index)?;
+                let item = self.item_mut_on(target, *index)?;
                 let filled = item.sockets.iter().filter(|s| s.is_some()).count();
                 if *count < filled {
                     return Err(EditError::Invalid(format!(
@@ -593,9 +628,10 @@ impl EditSession {
                         "格子坐标必须在 0–15（收到 {col},{row}）"
                     )));
                 }
-                let target = d2s::StorePage::from_raw(page.raw());
-                let item = self.item_mut(*index)?;
-                item.position.store_page = target;
+                // 注意：这里的局部名不要叫 target——那个名字是"物品列表"参数
+                let store_page = d2s::StorePage::from_raw(page.raw());
+                let item = self.item_mut_on(target, *index)?;
+                item.position.store_page = store_page;
                 item.position.inv_x = *col;
                 item.position.inv_y = *row;
                 // 放置模式跟着目标页走：装备页以外的都算"存放"
@@ -606,7 +642,7 @@ impl EditSession {
                 };
             }
             ItemEdit::SetEquipSlot { index, slot } => {
-                let item = self.item_mut(*index)?;
+                let item = self.item_mut_on(target, *index)?;
                 if slot.eq_ignore_ascii_case("none") {
                     // 卸下：回到背包、模式改回"存放"
                     item.position.body_location = d2s::BodyLocation::from_raw(0);
@@ -623,7 +659,7 @@ impl EditSession {
                 }
             }
             ItemEdit::SetStat { index, stat, value } => {
-                let item = self.item_mut(*index)?;
+                let item = self.item_mut_on(target, *index)?;
                 let id = StatId(*stat);
                 match item.stats.iter_mut().find(|s| s.id == id && s.layer == 0) {
                     Some(existing) => existing.value = *value,
@@ -635,7 +671,7 @@ impl EditSession {
                 }
             }
             ItemEdit::RemoveStat { index, stat } => {
-                let item = self.item_mut(*index)?;
+                let item = self.item_mut_on(target, *index)?;
                 let id = StatId(*stat);
                 let before = item.stats.len();
                 item.stats.retain(|s| s.id != id);
@@ -649,7 +685,7 @@ impl EditSession {
                         "格子坐标必须在 0–15（收到 {col},{row}）"
                     )));
                 }
-                let item = self.item_mut(*index)?;
+                let item = self.item_mut_on(target, *index)?;
                 item.position.inv_x = *col;
                 item.position.inv_y = *row;
             }
@@ -683,19 +719,28 @@ impl EditSession {
                         layer: *layer,
                     })
                     .collect();
-                self.item_mut(*index)?.stats = list;
+                self.item_mut_on(target, *index)?.stats = list;
             }
         }
-        self.item_edits.push(edit);
+        self.item_edits.push((target, edit));
         Ok(())
     }
 
-    /// 批量应用（原子）。
+    /// 批量应用（原子，作用于主物品列表）。
     pub fn apply_items(&mut self, edits: &[ItemEdit]) -> Result<(), EditError> {
+        self.apply_items_on(ItemTarget::Inventory, edits)
+    }
+
+    /// 对**指定列表**批量应用（原子）。
+    pub fn apply_items_on(
+        &mut self,
+        target: ItemTarget,
+        edits: &[ItemEdit],
+    ) -> Result<(), EditError> {
         let snapshot = self.file.save.clone();
         let applied_len = self.item_edits.len();
         for e in edits {
-            if let Err(err) = self.apply_item(e.clone()) {
+            if let Err(err) = self.apply_item_on(target, e.clone()) {
                 self.file.save = snapshot;
                 self.item_edits.truncate(applied_len);
                 return Err(err);
@@ -722,22 +767,80 @@ impl EditSession {
         self.item_edits.clear();
     }
 
-    fn item(&self, index: usize) -> Result<&d2s::Item, EditError> {
-        self.file.save.items.get(index).ok_or_else(|| {
+    /// 取某个列表里的物品（只读）。
+    fn item_on(&self, target: ItemTarget, index: usize) -> Result<&d2s::Item, EditError> {
+        let list = self.item_list(target)?;
+        let total = list.len();
+        list.get(index).ok_or_else(|| {
             EditError::Invalid(format!(
-                "物品序号 {index} 越界（共 {} 件）",
-                self.item_count()
+                "{}里的物品序号 {index} 越界（共 {total} 件）",
+                target.label()
             ))
         })
     }
 
-    fn item_mut(&mut self, index: usize) -> Result<&mut d2s::Item, EditError> {
-        let total = self.item_count();
-        self.file
-            .save
-            .items
-            .get_mut(index)
-            .ok_or_else(|| EditError::Invalid(format!("物品序号 {index} 越界（共 {total} 件）")))
+    /// 取某个列表里的物品（可变）。
+    fn item_mut_on(
+        &mut self,
+        target: ItemTarget,
+        index: usize,
+    ) -> Result<&mut d2s::Item, EditError> {
+        let total = self.item_list(target)?.len();
+        self.item_list_mut(target)?.get_mut(index).ok_or_else(|| {
+            EditError::Invalid(format!(
+                "{}里的物品序号 {index} 越界（共 {total} 件）",
+                target.label()
+            ))
+        })
+    }
+
+    /// 某个目标对应的物品列表（只读）。
+    ///
+    /// `ItemsSection` 是 `Vec<Item>` 的新类型，所以主列表与佣兵列表统一成切片。
+    fn item_list(&self, target: ItemTarget) -> Result<&[d2s::Item], EditError> {
+        match target {
+            ItemTarget::Inventory => Ok(&self.file.save.items.0),
+            ItemTarget::Mercenary => match &self.file.save.merc_items {
+                Some(m) => Ok(&m.items.0),
+                None => Err(EditError::Invalid("这件存档没有佣兵段".into())),
+            },
+        }
+    }
+
+    /// 某个目标对应的物品列表（可变）。
+    fn item_list_mut(&mut self, target: ItemTarget) -> Result<&mut Vec<d2s::Item>, EditError> {
+        match target {
+            ItemTarget::Inventory => Ok(&mut self.file.save.items.0),
+            ItemTarget::Mercenary => match &mut self.file.save.merc_items {
+                Some(m) => Ok(&mut m.items.0),
+                None => Err(EditError::Invalid("这件存档没有佣兵段".into())),
+            },
+        }
+    }
+}
+
+/// 物品指令作用的列表。
+///
+/// 存档里物品分两处存：主背包/箱子列表与**佣兵段**。两处的 `Item` 结构一样，
+/// 但**序号体系互不相干**（佣兵段的 #0 不是主列表的 #0），所以指令必须带上目标，
+/// 否则会改错物品。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ItemTarget {
+    /// 主物品列表（背包/箱子/方块/腰带/身上装备）。
+    #[default]
+    Inventory,
+    /// 佣兵装备段（`save.merc_items`）。
+    Mercenary,
+}
+
+impl ItemTarget {
+    /// 中文名（给错误信息与界面用）。
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Inventory => "物品栏",
+            Self::Mercenary => "佣兵",
+        }
     }
 }
 

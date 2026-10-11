@@ -29,7 +29,8 @@ pub use d2i::{D2iError, SharedStash};
 pub use edit::{CharacterView, Edit, EditError, EditSession, SkillView};
 pub use header::{HeaderError, SaveHeader, SaveVersion, MAGIC};
 pub use items::{
-    BoundsIssue, ItemDetail, ItemEdit, ItemStats, MercenaryItem, StorePageName, MAX_SOCKETS,
+    BoundsIssue, ItemDetail, ItemEdit, ItemStats, ItemTarget, MercenaryItem, StorePageName,
+    MAX_SOCKETS,
 };
 pub use layout::{needs_confirmation, LayoutHints, LayoutSettings};
 pub use save::{RoundTrip, SaveError, SaveFile, SaveKind};

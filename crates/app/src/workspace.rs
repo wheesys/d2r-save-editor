@@ -490,7 +490,18 @@ impl Workspace {
 
     /// 一件物品的完整明细（基础信息 + 带名字的属性列表）。
     pub fn item_detail_dto(&mut self, index: usize) -> Result<ItemDetailDto, AppError> {
-        let detail = { self.session()?.item_detail(index)? };
+        self.item_detail_dto_on(d2r_core::ItemTarget::Inventory, index)
+    }
+
+    /// 一件物品的完整明细（可指定列表）。
+    ///
+    /// 佣兵段与主列表序号体系不同，界面按佣兵序号取明细时要显式给目标。
+    pub fn item_detail_dto_on(
+        &mut self,
+        target: d2r_core::ItemTarget,
+        index: usize,
+    ) -> Result<ItemDetailDto, AppError> {
+        let detail = { self.session()?.item_detail_on(target, index)? };
         let size_map = crate::bundle::item_size_map();
         let mut namer = ItemNamer::new(&self.strings, &mut self.tables, self.lang.clone());
         let n = namer.resolve(&detail.code, &detail.quality, detail.quality_index);
@@ -545,6 +556,27 @@ impl Workspace {
     /// 物品汇总统计。
     pub fn item_stats(&self) -> Result<ItemStats, AppError> {
         Ok(self.session()?.item_stats())
+    }
+
+    /// 佣兵物品的完整明细（序号是佣兵段内的序号）。
+    pub fn mercenary_item_details(&mut self) -> Result<Vec<ItemDetailDto>, AppError> {
+        let total = self.session()?.mercenary_items().len();
+        (0..total)
+            .map(|i| self.item_detail_dto_on(d2r_core::ItemTarget::Mercenary, i))
+            .collect()
+    }
+
+    /// 按目标应用物品改动。
+    pub fn apply_item_edits_on(
+        &mut self,
+        target: d2r_core::ItemTarget,
+        edits: &[d2r_core::ItemEdit],
+    ) -> Result<usize, AppError> {
+        let count = edits.len();
+        self.session_mut()?
+            .apply_items_on(target, edits)
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Ok(count)
     }
 
     /// 佣兵装备段里的物品。

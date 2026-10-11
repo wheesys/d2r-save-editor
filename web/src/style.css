@@ -288,3 +288,28 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 .quest-state { font-size: 11px; color: #9a9a9a; }
 .quest.completed .quest-state { color: var(--accent); }
 .quest.inProgress { border-color: #6f8fd6; }
+/* ===== 佣兵 ===== */
+.merc-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 10px;
+  background: var(--panel-2);
+  cursor: pointer;
+  min-width: 260px;
+}
+.merc-card:hover { border-color: var(--accent); }
+.merc-icon { image-rendering: pixelated; width: 32px; height: 32px; object-fit: contain; }
+.merc-slot {
+  font-size: 12px;
+  color: var(--accent);
+  min-width: 26px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+.merc-body { display: flex; flex-direction: column; line-height: 1.25; font-size: 13px; }
+.merc-edit { margin-left: auto; font-size: 11px; color: #9a9a9a; }

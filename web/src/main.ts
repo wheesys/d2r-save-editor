@@ -14,7 +14,6 @@ import {
   type BundleInfo,
   type ItemDetailDto,
   type StatCatalogEntry,
-  type MercenaryItem,
   type QuestDifficultyDto,
   type QuestState,
   type LayoutSettings,
@@ -170,6 +169,15 @@ function renderWaypoints(list: WaypointsDto[]) {
 
 /** 当前选中的物品序号（用于属性弹窗） */
 let selectedItem: number | null = null;
+
+/**
+ * 弹窗当前操作的是哪个物品列表。
+ *
+ * 佣兵段与主物品列表**序号体系不同**，所以这个目标必须跟着弹窗走，
+ * 改值/删属性/应用修改都要带上它。
+ */
+type ItemTarget = "inventory" | "mercenary";
+let selectedTarget: ItemTarget = "inventory";
 /** 属性目录缓存 */
 let statCatalog: StatCatalogEntry[] = [];
 /** 当前布局设置（容器网格尺寸要用） */
@@ -318,12 +326,18 @@ function collectItemEdits(): ItemEdit[] {
   return edits;
 }
 
-/** 选中一件物品：打开**属性弹窗**（不再往页面下面堆内容） */
-async function selectItem(index: number) {
+/**
+ * 选中一件物品：打开**属性弹窗**。
+ *
+ * `target` 指明改哪个列表：佣兵段与主物品列表的**序号体系不同**，
+ * 不传目标就会按同一个序号去改另一个列表（改错物品）。
+ */
+async function selectItem(index: number, target: ItemTarget = "inventory") {
   selectedItem = index;
+  selectedTarget = target;
   renderItems(items);
   try {
-    const detail = await call<ItemDetailDto>("item_detail", { index });
+    const detail = await call<ItemDetailDto>("item_detail", { index, target });
     renderItemDetail(detail);
     openItemModal();
   } catch (e) {
@@ -448,7 +462,7 @@ async function applyDetailEdits() {
     return;
   }
   try {
-    const n = await call<number>("apply_item_edits", { edits });
+    const n = await call<number>("apply_item_edits", { edits, target: selectedTarget });
     pendingDetailEdits.length = 0;
     toast(`已应用 ${n} 条修改。点「保存」才会写入文件。`);
     const keep = selectedItem;
@@ -506,7 +520,7 @@ async function loadAll() {
   renderWaypoints(await call<WaypointsDto[]>("waypoints"));
   await loadQuests();
   try {
-    mercItems = await call<MercenaryItem[]>("mercenary_items");
+    mercItems = await call<ItemDetailDto[]>("mercenary_items");
   } catch {
     mercItems = [];
   }
@@ -624,7 +638,7 @@ async function completeAllQuests() {
  * 佣兵段与主物品列表分开存储，所以这里用的是佣兵段自己的序号；
  * 图标/名字按物品代码解析（与物品栏一致）。
  */
-let mercItems: MercenaryItem[] = [];
+let mercItems: ItemDetailDto[] = [];
 function renderMerc() {
   const host = $("#merc");
   if (mercItems.length === 0) {
@@ -637,28 +651,33 @@ function renderMerc() {
     RightRing: "右戒", LeftRing: "左戒", Gloves: "手", Belt: "腰", Feet: "脚",
   };
   host.innerHTML = mercItems
-    .map(
-      (it) =>
-        `<div class="merc-card">
-           <span class="merc-slot">${escapeHtml(slotLabel[it.bodyLocation] ?? it.bodyLocation)}</span>
-           <span class="merc-code">${escapeHtml(it.code)}</span>
-           <span class="merc-body">
-             <b>${escapeHtml(itemNameOf(it.code))}</b>
-             <span class="muted">品质 ${escapeHtml(it.quality)}｜等级 ${it.level}｜属性 ${it.statsCount} 条${
-               it.socketCount > 0 ? `｜孔 ${it.socketedCount}/${it.socketCount}` : ""
-             }</span>
-           </span>
-         </div>`,
-    )
+    .map((d) => {
+      const it = d.item;
+      const icon = iconFor(it.code);
+      return `<div class="merc-card" data-merc-index="${it.index}">
+         ${icon}
+         <span class="merc-slot">${escapeHtml(slotLabel[it.bodyLocation] ?? it.bodyLocation)}</span>
+         <span class="merc-body">
+           <b>${escapeHtml(it.name || it.code)}</b>
+           <span class="muted">${escapeHtml(it.code)}｜品质 ${escapeHtml(it.quality)}｜等级 ${it.level}｜属性 ${it.statsCount} 条${
+             it.socketCount > 0 ? `｜孔 ${it.socketedCount}/${it.socketCount}` : ""
+           }</span>
+         </span>
+         <span class="merc-edit">点此编辑</span>
+       </div>`;
+    })
     .join("");
+  // 佣兵条目也要能打开属性弹窗——必须带佣兵目标，否则会按同一个序号改到主列表
+  host.querySelectorAll<HTMLElement>("[data-merc-index]").forEach((el) => {
+    el.addEventListener("click", () => void selectItem(Number(el.dataset.mercIndex), "mercenary"));
+  });
   $("#merc-section").classList.remove("hidden");
 }
 
-/** 用物品代码在已加载的物品里找名字（佣兵物品不在主列表里，找不到就显示代码） */
-function itemNameOf(code: string): string {
-  const hit = items.find((i) => i.code === code);
-  if (hit) return hit.name;
-  return code;
+/** 按代码取物品图标（没有就返回空串，界面会退化成只显示文字） */
+function iconFor(code: string): string {
+  const icon = itemIcons[code];
+  return icon ? `<img class="merc-icon" src="${icon}" alt="" draggable="false" />` : "";
 }
 
 async function applyEdits(edits: Edit[], label: string) {
@@ -790,14 +809,18 @@ async function bootIfAlreadyOpen() {
  * 后端不可用时静默跳过，网格会退化成只显示物品代码。
  */
 let iconsLoaded = false;
+/** 图标缓存（佣兵页也用它，所以 main.ts 里留一份） */
+let itemIcons: Record<string, string> = {};
 async function loadIcons() {
   if (iconsLoaded) return;
   try {
     const icons = await call<[string, string][]>("item_icons");
     if (icons.length === 0) return;
     setItemIcons(icons);
+    itemIcons = Object.fromEntries(icons);
     iconsLoaded = true;
     renderContainerView();
+    renderMerc();
   } catch {
     /* 老后端没有这个命令 */
   }
@@ -957,7 +980,7 @@ function bind() {
       return;
     }
     try {
-      const n = await call<number>("apply_item_edits", { edits });
+      const n = await call<number>("apply_item_edits", { edits, target: selectedTarget });
       toast(`已应用 ${n} 条物品修改。点「保存」才会写入文件。`);
       await loadAll();
     } catch (e) {

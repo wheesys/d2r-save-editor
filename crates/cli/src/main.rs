@@ -1532,12 +1532,13 @@ fn cmd_import_item(args: &[String]) -> ExitCode {
 }
 fn cmd_items(args: &[String]) -> ExitCode {
     let json = args.iter().any(|a| a == "--json");
+    let merc = args.iter().any(|a| a == "--merc");
     let filter = arg_of(args, "--filter");
     let Some(target) = args
         .iter()
         .find(|a| !a.starts_with("--") && arg_of(args, "--filter").as_deref() != Some(a.as_str()))
     else {
-        eprintln!("用法: d2r items <文件.d2s> [--filter 关键字] [--json]");
+        eprintln!("用法: d2r items <文件.d2s> [--filter 关键字] [--merc] [--json]");
         return ExitCode::from(2);
     };
     let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
@@ -1545,7 +1546,17 @@ fn cmd_items(args: &[String]) -> ExitCode {
         eprintln!("打开失败：{e}");
         return ExitCode::from(1);
     }
-    let all = match ws.item_details() {
+    // --merc 时列佣兵段：它与主列表是分开存的两个列表、序号体系不同，
+    // 所以不能拿主列表的序号去查佣兵物品
+    let all: Vec<d2r_app::ItemDto> = match if merc {
+        ws.mercenary_item_details().map(|list| {
+            list.into_iter()
+                .map(|d| d.item)
+                .collect::<Vec<d2r_app::ItemDto>>()
+        })
+    } else {
+        ws.item_details()
+    } {
         Ok(v) => v,
         Err(e) => {
             eprintln!("读取物品失败：{e}");
@@ -1577,7 +1588,24 @@ fn cmd_items(args: &[String]) -> ExitCode {
     }
 
     println!("存档      : {target}");
-    if let Ok(st) = ws.item_stats() {
+    if merc {
+        // 佣兵段的统计不能沿用 ws.item_stats()——那是整个物品栏的数字，
+        // 显示在这里会让人以为佣兵带了 44 件装备
+        println!("来源      : 佣兵装备段（序号与物品栏互不相干）");
+        let mut by_quality: std::collections::BTreeMap<String, usize> = Default::default();
+        for i in &items {
+            *by_quality.entry(i.quality.clone()).or_default() += 1;
+        }
+        println!("物品      : {} 件", items.len());
+        println!(
+            "  品质    : {}",
+            by_quality
+                .iter()
+                .map(|(k, v)| format!("{k} {v}"))
+                .collect::<Vec<_>>()
+                .join("｜")
+        );
+    } else if let Ok(st) = ws.item_stats() {
         println!(
             "物品      : {} 件｜已装备 {}｜含镶嵌物 {}",
             st.total, st.equipped, st.with_sockets

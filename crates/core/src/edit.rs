@@ -213,7 +213,7 @@ pub struct EditSession {
     /// 已应用的指令记录。
     pub applied: Vec<Edit>,
     /// 已应用的物品指令记录。
-    pub item_edits: Vec<crate::items::ItemEdit>,
+    pub item_edits: Vec<(crate::items::ItemTarget, crate::items::ItemEdit)>,
 }
 
 impl EditSession {
