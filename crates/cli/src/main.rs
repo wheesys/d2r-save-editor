@@ -1324,26 +1324,21 @@ fn cmd_item(args: &[String]) -> ExitCode {
         "ID", "层", "名称", "内部名", "值"
     );
     for s in &detail.stats {
-        // 值列显示**用户可见值**（按等级的是每级小数，如 7.875）
+        // 值列直接显示**存档里的值**（不做游戏显示值换算）
         let display_text = d2r_data::statlimit::format_rate(s.display_value);
-        // 「按等级」要写在最前面：这类属性存的是**每级**的值，
-        // 不说明的话 61 会被当成总值。
         let mut notes: Vec<String> = Vec::new();
         if s.per_level {
-            // 只给"每级加多少"（用户明确要求不用管一共加了多少）
-            notes.push(format!(
-                "每级 +{}",
-                d2r_data::statlimit::format_rate(s.display_value)
-            ));
+            // 按数据大小处理：编辑的就是存档里的值。
+            // 这里只说明"它是按等级加成的"，不给容易误导的"每级 X"
+            // （这个值本身还含 1/256 精度，说成"每级"会算错）。
+            notes.push("按等级加成（游戏内按 值 × 等级 / 8 生效）".into());
         }
         if !s.user_visible {
             notes.push("内部字段（可能不生效）".into());
         }
-        // 存储精度提示：只有"存储精度 < 显示精度"时才需要说明
-        // （例如生命按 1/256 精度存，显示值是整数；按等级加成的每级小数
-        // 本身就体现了精度，不必再提）
-        if !s.per_level && s.display_step < 1.0 {
-            notes.push(format!("按 1/{:.0} 精度存储", 1.0 / s.display_step));
+        // 需要按精度取倍数时说明一下
+        if s.display_step > 1.0 {
+            notes.push(format!("取值须是 {} 的倍数", s.display_step as i64));
         }
         // 参数含义（如"获得 31 级「狂热」光环"）——比"含参数"有用得多
         if let Some(pl) = &s.param_label {

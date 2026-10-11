@@ -140,106 +140,52 @@ impl StatLimit {
     /// 用 `f64` 是因为结果可能不是整数：生命 `item_hp_perlevel` 的系数是 63、
     /// `op param` 是 3，所以每级是 `63/8 = 7.875`。界面直接显示这个数，
     /// **不要再乘角色等级**（用户明确要求只看每级多少）。
+    /// 界面上给用户看的**每级系数**（仅 `*perlevel` 属性有意义）。
+    ///
+    /// 这类属性的值在游戏里要按 `值 × 角色等级 / 2^op_param` 算，
+    /// 但**编辑的仍是存档里的原始值**。这个数字只用于"说明"，
+    /// 让用户知道这条属性是按等级加成的、每级大概多少。
     pub fn per_level_rate(&self, value: i64) -> f64 {
         let divisor = (1i64 << self.op_param.min(62)) as f64;
         value as f64 / divisor
     }
 
-    /// 界面上的值（**位字段原值**）→ `d2s` 期望的存储值。
+    /// 界面上的值 = **存档里的值本身**。
     ///
-    /// `d2s` 的编码是 `value = (field - SaveAdd) << ValShift`，直接照这个来。
-    /// 顺序不能换：`(field << vs) - add` 在 `SaveAdd` 非零时会算错
-    /// （`maxhp` 字段 798 会得到 204256 而不是 196096，用穷举验过）。
-    pub fn to_stored(&self, display: f64) -> i64 {
-        let field = display.round() as i64;
-        (field - self.save_add as i64) << self.val_shift.min(62)
-    }
-
-    /// `d2s` 的存储值 → 界面上显示的**位字段原值**。
-    ///
-    /// `d2s` 解码是 `field = (value >> ValShift) + SaveAdd`，照这个来。
-    ///
-    /// ## 为什么游戏显示的是字段值
-    ///
-    /// 验证（`crates/cli/src/bin/fieldcheck.rs`）：全部 263 条属性的实测取值
-    /// 按这个假设算出的字段都放得进位宽，没有一条超宽；区间也与用户在游戏里
-    /// 看到的对上：
-    /// - `item_maxhp_percent`（6 位）→ 用户说范围 **0–63**，
-    ///   而把字段再减 `SaveAdd` 会得到 -10..53（那个负数就是假的）；
-    /// - `item_fastermovevelocity`（7 位）→ 用户说最大 **127**，
-    ///   减 `SaveAdd` 会变成 107。
-    ///
-    /// 即 `SaveAdd` 是**位字段的内部偏置**，游戏界面显示的是加回偏置后的字段值，
-    /// 修改器也要这样做才和游戏里一致。
+    /// 用户决定（2026-10）：**不做游戏显示值换算**，直接按数据大小处理，
+    /// 只把每条属性的有效范围说明清楚。原因是各属性的处理方式不同
+    /// （`ItemStatCost` 里还有 `Encode` / `Add` / `Multiply` 这些列，
+    /// 没有可靠的公开定义），与其猜错，不如把原始数据如实呈现。
     pub fn to_user(&self, stored: i64) -> f64 {
-        ((stored >> self.val_shift.min(62)) + self.save_add as i64) as f64
+        stored as f64
     }
 
-    /// 界面输入框的最小变化量（`step`）。
-    ///
-    /// 按等级加成的属性：每级 1 点需要 `2^op_param` 点值，
-    /// 所以界面上最小变化是 `1 / 2^op_param`（生命是 `0.125`）。
-    pub fn user_step(&self) -> f64 {
-        if self.per_level {
-            1.0 / (1i64 << self.op_param.min(62)) as f64
-        } else {
-            1.0
-        }
+    /// [`Self::to_user`] 的逆运算：界面值就是存档值。
+    pub fn to_stored(&self, display: f64) -> i64 {
+        display.round() as i64
     }
 
-    /// 界面上给用户看的数。
-    ///
-    /// - 按等级加成的属性（`*perlevel`）：**每级加多少** = 字段值 / `2^op_param`
-    ///   （生命字段 63、`op param` 3 → `7.875`）。用户明确要求只显示每级多少。
-    /// - 其它属性：就是**字段值**本身（`item_maxhp_percent` 显示 31 之类）。
+    /// 界面上给用户看的数：就是存档里的值。
     pub fn display_value(&self, stored: i64) -> f64 {
-        let field = self.to_user(stored);
-        if self.per_level {
-            field / (1i64 << self.op_param.min(62)) as f64
-        } else {
-            field
-        }
+        stored as f64
     }
 
-    /// [`Self::display_value`] 的逆运算：把界面上填的数换回 `d2s` 的存储形态。
+    /// [`Self::display_value`] 的逆运算。
     pub fn stored_from_display(&self, display: f64) -> i64 {
-        let field = if self.per_level {
-            display * (1i64 << self.op_param.min(62)) as f64
-        } else {
-            display
-        };
-        self.to_stored(field)
+        display.round() as i64
     }
 
-    /// 界面上的有效范围（与 [`Self::display_value`] 同单位）。
+    /// 界面上的有效范围 = **存档里的有效范围**。
     pub fn display_range(&self) -> (f64, f64) {
-        let divisor = if self.per_level {
-            (1i64 << self.op_param.min(62)) as f64
-        } else {
-            1.0
-        };
-        (
-            self.to_user(self.min()) / divisor,
-            self.to_user(self.max()) / divisor,
-        )
+        (self.min() as f64, self.max() as f64)
     }
 
-    /// 把**存档里的值**换算成**游戏里显示的值**。
+    /// 界面输入框的最小变化量。
     ///
-    /// 只需要处理移位（`ValShift`）：带移位的属性存的是放大过的量，
-    /// 生命/法力 按 1/256 精度存（存档 16128 → 游戏显示 **63**）。
-    ///
-    /// **不加/减 `Save Add`**：实测存档里的攻速/施法/跑速类值本身就是
-    /// 游戏显示值（10/20/30/40 都是标准词缀值，`item_allskills` 是 7），
-    /// 所以 `Save Add` 只是**位字段的内部偏移**，不是显示偏移。
-    /// 一开始按"减去 Save Add"换算，得出"存档 50 → 显示 30"，
-    /// 但那样 127 会变成 107，和用户看到的字段满值 127 对不上。
-    pub fn to_display(&self, raw: i64) -> i64 {
-        if self.val_shift > 0 {
-            raw / self.step()
-        } else {
-            raw
-        }
+    /// 带移位（`ValShift`）的属性在存档里按 `2^ValShift` 的精度存，
+    /// 值必须是它的倍数，所以界面步长就是 [`Self::step`]。
+    pub fn user_step(&self) -> f64 {
+        self.step() as f64
     }
 }
 
@@ -509,76 +455,64 @@ mod tests {
         assert!(limits.check(9999, i64::MAX).is_ok());
     }
 
-    /// 显示值 = **存档位字段的原值**（游戏里显示的就是它）。
+    /// **按数据大小处理**：界面显示/编辑的值就是存档里的值本身。
     ///
-    /// 用户要求"修改器展示的和游戏内一致"。验证见
-    /// `crates/cli/src/bin/fieldcheck.rs`：全部 263 条属性的实测取值按这个
-    /// 假设都能落进位宽，且区间与用户在游戏里看到的吻合
-    /// （`item_maxhp_percent` → 0–63、`item_fastermovevelocity` → 最大 127）。
+    /// 用户决定（2026-10）：不做游戏显示值换算（各属性处理方式不同，
+    /// `ItemStatCost` 里还有 `Encode` / `Add` / `Multiply` 没有可靠公开定义），
+    /// 只把每条属性的**有效范围**说明清楚。
     #[test]
-    fn display_is_the_raw_field_value() {
-        // item_maxhp_percent：6 位、SaveAdd 10 → d2s 给的 31 对应字段 41
-        let hpp = limit(76, 6, 10, 0);
-        assert_eq!(hpp.to_user(31), 41.0, "字段 = d2s值 + SaveAdd");
-        assert_eq!(hpp.to_stored(41.0), 31, "存回 d2s 形态");
-        assert_eq!(hpp.display_range().1, 63.0, "6 位满值 63");
-
-        // item_allskills：SaveAdd 0 → 字段值就是 d2s 值
-        let sk = limit(127, 3, 0, 0);
-        assert_eq!(sk.to_user(7), 7.0);
-        assert_eq!(sk.range_text(), "0–7");
-
-        // item_fastermovevelocity：7 位、SaveAdd 20 → 字段上限 127
-        let frw = limit(96, 7, 20, 0);
-        assert_eq!(frw.to_user(30), 50.0);
-        assert_eq!(frw.to_stored(50.0), 30);
-        assert_eq!(frw.display_range().1, 127.0);
+    fn display_is_the_stored_value_itself() {
+        for (id, bits, add, vs) in [
+            (76u16, 6u8, 10u32, 0u8), // item_maxhp_percent
+            (96, 7, 20, 0),           // item_fastermovevelocity
+            (127, 3, 0, 0),           // item_allskills
+            (7, 9, 32, 8),            // maxhp
+        ] {
+            let l = limit(id, bits, add, vs);
+            // 往返恒等：界面值 == 存档值
+            for v in [l.min(), 0, 1, l.max()] {
+                assert_eq!(l.display_value(v), v as f64, "ID {id} 显示值应等于存档值");
+                assert_eq!(l.stored_from_display(v as f64), v, "ID {id} 往返应恒等");
+            }
+        }
     }
 
-    /// 按等级加成：界面只给"每级加多少" = 字段值 / 2^op_param。
+    /// 范围按**存档值**给出（位宽 + 偏移 + 移位算出来的那个区间）。
     #[test]
-    fn display_value_for_per_level_stats() {
-        // 无位移：字段 61、op param 3 → 每级 7.625
+    fn range_is_in_stored_units() {
+        // item_maxhp_percent：6 位、SaveAdd 10 → -10..53
+        let hpp = limit(76, 6, 10, 0);
+        assert_eq!(hpp.range_text(), "-10–53");
+        // item_allskills：3 位、无偏移 → 0..7
+        assert_eq!(limit(127, 3, 0, 0).range_text(), "0–7");
+        // item_fastermovevelocity：7 位、SaveAdd 20 → -20..107
+        assert_eq!(limit(96, 7, 20, 0).range_text(), "-20–107");
+        // maxhp：9 位、SaveAdd 32、ValShift 8 → 步长 256，区间 256..122624
+        let hp = limit(7, 9, 32, 8);
+        assert_eq!(hp.range_text(), "256–122624");
+        assert_eq!(hp.user_step(), 256.0, "取值须是 256 的倍数");
+    }
+
+    /// 按等级加成的属性：**编辑的仍是存档值**，per_level_rate 只用于说明。
+    #[test]
+    fn per_level_stats_edit_stored_value() {
         let mut strl = limit(220, 6, 0, 0);
         strl.per_level = true;
         strl.op_param = 3;
-        assert_eq!(strl.to_user(61), 61.0);
-        assert_eq!(strl.display_value(61), 7.625);
-        assert_eq!(strl.stored_from_display(7.625), 61);
-        assert!((strl.user_step() - 0.125).abs() < 1e-9);
+        // 编辑值就是存档值 61，不做任何除法
+        assert_eq!(strl.display_value(61), 61.0);
+        assert_eq!(strl.stored_from_display(61.0), 61);
+        // 说明用的"每级"是 61/8 = 7.625（游戏内按 值×等级/8 生效）
+        assert_eq!(format_rate(strl.per_level_rate(61)), "7.625");
 
-        // 同时带位移（item_hp_perlevel：SaveAdd 0、ValShift 8）：
-        // d2s 值 16128 → 字段 (16128 >> 8) + 0 = 63 → 每级 63/8 = 7.875
+        // 同时带移位（SaveAdd 0、ValShift 8）：存档值 16128，步长 256
         let mut hpl = limit(216, 6, 0, 8);
         hpl.per_level = true;
         hpl.op_param = 3;
-        assert_eq!(hpl.to_user(16128), 63.0, "先还原字段");
-        assert_eq!(hpl.display_value(16128), 7.875, "再除以 8 得每级");
-        assert_eq!(hpl.stored_from_display(7.875), 16128, "存回 d2s 形态");
+        assert_eq!(hpl.display_value(16128), 16128.0, "按数据大小处理");
+        assert_eq!(hpl.stored_from_display(16128.0), 16128);
+        assert_eq!(hpl.user_step(), 256.0);
     }
-
-    /// 显示值 ↔ 原始值的换算（**用户只看游戏值**）。
-    ///
-    /// 这条是用户明确要求的："我们修改器给用户看的要是游戏里面展示的，
-    /// 换算是我们自己完成的，不要让用户感知到"。
-    #[test]
-    fn display_conversion_matches_game() {
-        // 生命：ValShift 8 / SaveAdd 32 → d2s 的 16128 对应字段 95
-        let hp = limit(7, 9, 32, 8);
-        assert_eq!(hp.to_user(16128), 95.0, "(16128>>8)+32");
-        assert_eq!(hp.to_stored(95.0), 16128, "存回 d2s 形态");
-        assert_eq!(hp.to_display(16128), 63, "仅在只有移位、无偏置时成立");
-
-        // 跑速：**不换算**（存档里的值就是字段值再减偏置）
-        let frw = limit(96, 7, 20, 0);
-        assert_eq!(frw.to_user(30), 50.0);
-        assert_eq!(frw.to_stored(50.0), 30);
-
-        // 所有技能：3 位 → 0..7
-        let sk = limit(127, 3, 0, 0);
-        assert_eq!(sk.range_text(), "0–7");
-    }
-
     /// 参数位是**另算一段位**的，所以值仍按位宽判，只给提示。
     #[test]
     fn param_bits_still_check_value_range() {
@@ -624,17 +558,19 @@ mod tests {
         assert_eq!((strl.per_level_rate(61) * 52.0) as i64, 396);
 
         // **同时带移位与按等级加成**（item_hp_perlevel：op param 3 + ValShift 8）
-        // 先把 d2s 值还原成字段（`16128 >> 8 = 63`），再除以 8 得每级 7.875。
-        // 只做其中一个会得到 2016 或 63（都踩过）。
+        // 按数据大小处理：编辑的就是存档里的 16128（步长 256）。
+        // 说明用的"每级"= 16128 / 256 / 8 = 7.875（先按精度还原再除以 8）。
         let mut hpl = limit(216, 6, 0, 8);
         hpl.per_level = true;
         hpl.op_param = 3;
-        assert_eq!(hpl.to_user(16128), 63.0, "先还原字段");
-        assert_eq!(hpl.display_value(16128), 7.875, "再除以 8 得每级");
-        assert_eq!(hpl.stored_from_display(7.875), 16128, "存回 d2s 形态");
-        assert_eq!(format_rate(hpl.display_value(16128)), "7.875");
-        // 界面步长是 1/8 = 0.125（填 7.875 → 存 63）
-        assert!((hpl.user_step() - 0.125).abs() < 1e-9);
+        assert_eq!(hpl.display_value(16128), 16128.0, "编辑值=存档值");
+        assert_eq!(hpl.stored_from_display(16128.0), 16128);
+        assert_eq!(hpl.user_step(), 256.0, "取值须是 256 的倍数");
+        assert_eq!(
+            format_rate(hpl.per_level_rate(16128 / 256)),
+            "7.875",
+            "说明用的每级 = (16128/256)/8"
+        );
 
         // 命中类属性是 op param = 1（每级 1 点需要 2 点值）
         let mut ar = limit(224, 6, 0, 0); // item_tohit_perlevel
