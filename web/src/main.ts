@@ -98,6 +98,10 @@ async function refreshDataset() {
 function setDirty(dirty: boolean) {
   $("#dirty").classList.toggle("hidden", !dirty);
   $("#btn-save").toggleAttribute("disabled", !dirty);
+  // 「放弃修改」也要跟着启用/禁用：以前它只在 HTML 里写死 `disabled`，
+  // 而这里只切换了「保存」，于是**永远点不了**（用户反馈过）。
+  // 没有改动时它可以点但没意义，所以跟「保存」用同一条件。
+  $("#btn-reload").toggleAttribute("disabled", !dirty);
 }
 
 function renderSaveInfo(info: SaveInfo) {
@@ -511,17 +515,20 @@ function renderItemDetail(detail: ItemDetailDto) {
   });
 }
 
-/** 立即删除一条属性（按 `stat + layer` 精确定位，否则会同 ID 全删）。 */
+/** 立即删除一条属性（按 `stat + layer` 精确定位）。 */
 async function removeStatNow(stat: number, layer: number) {
   if (selectedItem === null) return;
   try {
     await call<number>("apply_item_edits", {
-      edits: [
-        { kind: "removeStat", index: selectedItem, stat, layer: layer === 0 ? undefined : layer },
-      ],
+      // **总是带上层**：后端对"不带层"的语义是"删掉该 ID 的全部记录"，
+      // 于是删一条 `item_addclassskills`（层 0）会把层 1 那条也一起删掉
+      // （用户实际遇到过）。
+      edits: [{ kind: "removeStat", index: selectedItem, stat, layer }],
       target: selectedTarget,
     });
-    toast(`已删除：属性 ${stat}${layer === 0 ? "" : `（值2 = ${layer}）`}。点「保存」才写入文件。`);
+    toast(
+      `已删除：属性 ${stat}${layer === 0 ? "" : `（值2 = ${layer}）`}。点「保存」才写入文件。`,
+    );
     $("#detail-result").textContent = "";
     await reloadItemDetail();
   } catch (e) {
@@ -764,11 +771,9 @@ function bindStatRowAutoApply() {
     .forEach((el) => {
       const stat = Number(el.dataset.statId);
       const layer = Number(el.dataset.statLayer);
+      // 只绑 `blur`：**不注册任何键盘快捷键**（用户要求）。
+      // 失焦即提交，点别处 / 按 Tab 走开都会生效。
       el.addEventListener("blur", () => void applyRowNow(stat, layer));
-      // 回车也触发一次，符合"填完就提交"的直觉（blur 随后会到，但相等时会自动跳过）
-      el.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") void applyRowNow(stat, layer);
-      });
     });
   $("#item-stats")
     .querySelectorAll<HTMLElement>("[data-stat-layer-sel]")
@@ -1377,11 +1382,6 @@ function bind() {
   document.querySelectorAll("[data-close-modal]").forEach((el) => {
     el.addEventListener("click", closeItemModal);
   });
-  document.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Escape") return;
-    if (!$("#item-modal").classList.contains("hidden")) closeItemModal();
-    if (!$("#settings-modal").classList.contains("hidden")) closeSettingsModal();
-  });
 
   $("#btn-quests-all").addEventListener("click", () => void completeAllQuests());
 
@@ -1390,13 +1390,9 @@ function bind() {
     btn.addEventListener("click", () => activateTab(btn.dataset.tab ?? "char"));
   });
 
-  // 数字键 1..6 直接切页签（键盘操作比鼠标快，也方便截图核对）
-  document.addEventListener("keydown", (ev) => {
-    if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLSelectElement) return;
-    const order = ["char", "skills", "quests", "items", "merc"];
-    const n = Number(ev.key);
-    if (Number.isInteger(n) && n >= 1 && n <= order.length) activateTab(order[n - 1]);
-  });
+  // **不注册任何键盘快捷键**（用户要求）：
+  // 数字键切页签、Esc 关弹窗都去掉了，避免和别的程序抢键
+  // （之前那个"取出 key 转数字"的写法还会让 F1 之类的功能键也走一遍处理）。
 
   // 还没打开存档前，每个页签先显示"该做什么"，避免点进去看到一片空白
   renderEmptyState();

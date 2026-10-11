@@ -181,6 +181,51 @@ fn repeated_edits_do_not_grow_the_stat_list() {
     assert_eq!(value_of(&session, index, stat, layer), Some(5));
 }
 
+/// 删除**一条**层属性时，同 ID 的其他层必须留下。
+///
+/// 用户报"删除的时候，有两条技能等级就一起删了"：前端对层 0 的那条传了
+/// "不带层"，而后端"不带层"的语义是"删该 ID 全部"，于是层 1 那条也没了。
+/// 现在前端总是带上层；这条测试把后端的**按层删除**行为钉住。
+#[test]
+fn removing_one_layer_keeps_the_other() {
+    let Some((src, index, stat, layer)) = sample_with_layered_stat() else {
+        eprintln!("跳过：样本里没有带层的属性");
+        return;
+    };
+    let work = work_copy(&src, "remove_layer");
+    let mut session = EditSession::open(&work).expect("打开");
+    let before = count_stats(&session, index, stat);
+    if before < 2 {
+        eprintln!("跳过：这条属性只有一层，测不到区分度");
+        return;
+    }
+
+    session
+        .apply_item(ItemEdit::RemoveStat {
+            index,
+            stat,
+            layer: Some(layer),
+        })
+        .expect("按层删除");
+
+    assert_eq!(
+        count_stats(&session, index, stat),
+        before - 1,
+        "只该少一条（删哪层就只删哪层）"
+    );
+    assert_eq!(
+        value_of(&session, index, stat, layer),
+        None,
+        "被指定的那一层应已删除"
+    );
+    let others = session.item_details()[index]
+        .stats
+        .iter()
+        .filter(|(id, _, l)| *id == stat && *l != layer)
+        .count();
+    assert_eq!(others, before - 1, "其他层不该被牵连");
+}
+
 #[test]
 fn target_defaults_to_inventory() {
     // 不使用 `apply_item_on` 时目标应是主物品列表

@@ -364,6 +364,15 @@ console.log("=== 7. 新增属性一行：搜索框 + 值2 控件 ===");
   // 光环可选值写死成常量（不再每次启动扫表）
   const backend = readFileSync(new URL("../crates/app/src/workspace.rs", import.meta.url), "utf8");
   check("光环 ID 已写成常量", backend.includes("ITEM_AURA_SKILL_IDS"));
+  // 「放弃修改」必须跟着"有没有改动"启用/禁用。
+  // 曾经它只在 HTML 里写死 disabled，而 setDirty 只切换了「保存」，
+  // 于是这个按钮永远点不了（用户实际遇到过）。
+  check(
+    "「放弃修改」跟着改动状态联动",
+    /btn-reload"\)\.toggleAttribute\("disabled"/.test(js),
+  );
+  // 不注册任何键盘快捷键（用户要求）
+  check("没有任何键盘监听", !/addEventListener\("key/.test(js));
   check(
     "光环常量是 21 个圣骑士光环",
     /ITEM_AURA_SKILL_IDS: \[u16; 21\]/.test(backend),
