@@ -26,8 +26,7 @@ const FILE_NAME: &str = "settings.json";
 
 /// 配置内容。
 ///
-/// 只有 `layout`：以后要加别的设置（语言、主题等）就往这里加字段，
-/// 老配置文件缺字段时靠 `#[serde(default)]` 兜住。
+/// 老配置文件缺字段时靠 `#[serde(default)]` 兜住，所以**加字段是兼容的**。
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -37,6 +36,11 @@ pub struct Settings {
     /// 用户是否确认过布局（没确认过就不要当成事实）。
     #[serde(default)]
     pub layout_confirmed: bool,
+    /// 最近打开的存档路径（最新的在最前）。
+    ///
+    /// 用途是给"打开存档"对话框定起始目录，免得每次都从默认位置重新找。
+    #[serde(default)]
+    pub recent_paths: Vec<String>,
 }
 
 /// 配置文件的读写。

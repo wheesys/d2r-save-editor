@@ -73,11 +73,19 @@ pub struct Workspace {
     config: crate::config::ConfigStore,
     /// 上一次存设置的提示（存成功/失败各一句）。
     config_note: Option<String>,
+    /// 最近打开的存档路径（最新的在最前）。
+    recent: Vec<String>,
     /// 当前编辑会话。
     session: Option<EditSession>,
     /// 当前已打开的存档信息（未打开时为 `None`）。
     current: Option<SaveInfo>,
 }
+
+/// 最近打开的存档最多记几条。
+///
+/// 只需要"上次打开的那个"来定起始目录，多留几条是为了万一前一个被删/改名
+/// 还能退回上一个可用的。
+const MAX_RECENT: usize = 8;
 
 /// 默认游戏目录。
 pub fn default_game_dir() -> PathBuf {
@@ -175,10 +183,13 @@ impl Workspace {
         let quest_namer = d2r_data::QuestNamer::new(&strings);
 
         // 读取用户设置：布局是 mod 级、整机一份。读出来直接当默认值，
-        // 这样"设置过一次"之后每次打开任何角色都不用再填。
+        // 这样"设置过一次"之后每次打开任何角色都不用再填；
+        // 最近打开的路径也一起读回来，用于给"打开存档"对话框定起始目录。
         // 读失败（没有文件/内容坏了）就退回默认值，不让配置问题挡住主流程。
         let config = crate::config::ConfigStore::new();
-        let layout = config.load().map(|s| s.layout).unwrap_or_default();
+        let saved = config.load();
+        let layout = saved.as_ref().map(|s| s.layout.clone()).unwrap_or_default();
+        let recent = saved.map(|s| s.recent_paths).unwrap_or_default();
 
         Self {
             game_dir,
@@ -191,6 +202,7 @@ impl Workspace {
             quest_namer,
             config,
             config_note: None,
+            recent,
             strings,
             lang: "zhCN".to_string(),
             layout,
@@ -252,7 +264,38 @@ impl Workspace {
         };
         self.session = Some(session);
         self.current = Some(info.clone());
+        // 记下这次打开的路径：下次"打开存档"直接从这里开始，不用重新找目录
+        self.remember_path(&info.path);
         Ok(info)
+    }
+
+    /// 记录最近打开的存档路径（最多保留 `MAX_RECENT` 条，最新的在最前）。
+    ///
+    /// 存到设置文件里，所以**跨重启有效**。写盘失败不影响打开操作本身。
+    pub fn remember_path(&mut self, path: &str) {
+        if path.is_empty() {
+            return;
+        }
+        self.recent.retain(|p| p != path);
+        self.recent.insert(0, path.to_string());
+        self.recent.truncate(MAX_RECENT);
+        self.save_settings();
+    }
+
+    /// 最近打开的存档路径（最新的在最前）。
+    pub fn recent_paths(&self) -> &[String] {
+        &self.recent
+    }
+
+    /// 下次打开对话框的起始目录：最近一次打开的那个文件所在目录。
+    ///
+    /// 用目录而不是文件本身，是因为对话框插件对 `defaultPath` 的处理
+    /// 在不同平台上不一致（有的当目录、有的当文件名）；给目录最稳。
+    pub fn default_open_dir(&self) -> Option<String> {
+        let last = self.recent.first()?;
+        let parent = Path::new(last).parent()?;
+        // 目录还在才给（存档可能被删/移走）
+        parent.is_dir().then(|| parent.display().to_string())
     }
 
     /// 会话是否存在。
@@ -420,6 +463,7 @@ impl Workspace {
         let settings = crate::config::Settings {
             layout: self.layout.clone(),
             layout_confirmed: self.layout.confirmed_by_user,
+            recent_paths: self.recent.clone(),
         };
         match self.config.save(&settings) {
             Ok(p) => self.config_note = Some(format!("设置已保存到 {}", p.display())),

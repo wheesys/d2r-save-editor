@@ -979,20 +979,27 @@ function bind() {
 
   $("#btn-open").addEventListener("click", async () => {
     try {
+      // 从上次打开的目录开始，免得每次都要重新翻到存档目录。
+      // 用目录而不是文件名：对话框插件对各平台的 defaultPath 处理不一致，
+      // 给目录最稳（后端也保证只在目录还存在时才给）。
+      const startDir = await call<string | null>("default_open_dir").catch(() => null);
       const picked = await openDialog({
         multiple: false,
+        defaultPath: startDir ?? undefined,
         filters: [{ name: "D2R 存档", extensions: ["d2s", "d2i"] }],
       });
       if (!picked || typeof picked !== "string") return;
       const info = await call<SaveInfo>("open_save", { path: picked });
+      // 记下路径（跨重启保留），下次对话框从这里开始
+      await call<void>("remember_open_path", { path: picked }).catch(() => undefined);
       renderSaveInfo(info);
       if (info.kind === "stash") {
         toast("共享箱（.d2i）暂只支持查看与保真保存，编辑功能待后续版本。", "error", 6000);
-        $("#char-section").classList.add("hidden");
-        $("#skills-section").classList.add("hidden");
-        $("#waypoints-section").classList.add("hidden");
-        $("#items-section").classList.add("hidden");
-        return;
+        // 共享箱没有角色/技能/任务/佣兵，这几块藏掉；但**不能直接 return**，
+        // 否则物品页签也不会渲染（曾经就是这个 bug：箱子打开了却一片空白）
+        for (const sel of ["#char-section", "#skills-section", "#quests-section", "#merc-section"]) {
+          $(sel).classList.add("hidden");
+        }
       }
       await loadAll();
     } catch (e) {

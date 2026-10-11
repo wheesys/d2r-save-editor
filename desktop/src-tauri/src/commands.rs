@@ -220,6 +220,25 @@ pub fn quests(state: State<'_, AppState>) -> R<Vec<QuestDifficultyDto>> {
 pub fn apply_quest_edits(state: State<'_, AppState>, edits: Vec<d2r_core::Edit>) -> R<usize> {
     state.0.lock().unwrap().apply_quest_edits(&edits)
 }
+/// 记下刚打开的存档路径（跨重启保留），供下次定对话框起始目录。
+///
+/// 前端在 `open_save` 成功后调用。写盘失败不影响结果，所以不返回错误。
+#[tauri::command]
+pub fn remember_open_path(state: State<'_, AppState>, path: String) {
+    state.0.lock().unwrap().remember_path(&path);
+}
+
+/// 最近打开的存档路径（最新的在最前）。前端用它给文件对话框定起始目录。
+#[tauri::command]
+pub fn recent_paths(state: State<'_, AppState>) -> Vec<String> {
+    state.0.lock().unwrap().recent_paths().to_vec()
+}
+
+/// 下次"打开存档"的起始目录（目录不存在时返回 `None`）。
+#[tauri::command]
+pub fn default_open_dir(state: State<'_, AppState>) -> Option<String> {
+    state.0.lock().unwrap().default_open_dir()
+}
 /// 应用版本信息。
 #[tauri::command]
 pub fn versions() -> serde_json::Value {

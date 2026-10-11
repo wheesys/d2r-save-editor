@@ -35,6 +35,7 @@ fn roundtrip_keeps_layout_and_confirmed() {
             confirmed_by_user: true,
         },
         layout_confirmed: true,
+        ..Settings::default()
     };
     let written = store.save(&settings).expect("写配置");
     assert_eq!(written, path, "显式路径应写到指定文件");
@@ -76,6 +77,36 @@ fn default_path_is_a_json_file() {
     );
 }
 
+/// 最近打开的路径要能存下来（跨重启），顺序是"最新在最前"。
+#[test]
+fn recent_paths_roundtrip_and_order() {
+    let path = dir("recent").join("settings.json");
+    let store = ConfigStore::at(&path);
+
+    let settings = Settings {
+        recent_paths: vec![r"C:\saves\b.d2s".to_string(), r"C:\saves\a.d2s".to_string()],
+        ..Settings::default()
+    };
+    store.save(&settings).unwrap();
+
+    let back = store.load().unwrap();
+    assert_eq!(back.recent_paths.len(), 2);
+    assert_eq!(back.recent_paths[0], r"C:\saves\b.d2s", "最新的应在最前");
+}
+
+/// 老配置（没有 recentPaths 字段）读进来应是空表，不是报错。
+#[test]
+fn config_without_recent_paths_loads_empty() {
+    let path = dir("no-recent").join("settings.json");
+    std::fs::write(
+        &path,
+        r#"{"layout":{"inventoryCols":10,"inventoryRows":4,"cubeCols":3,"cubeRows":4,"stashCols":10,"stashRows":10,"mercFullEquipment":false,"confirmedByUser":true}}"#,
+    )
+    .unwrap();
+    let settings = ConfigStore::at(&path).load().expect("应能读");
+    assert!(settings.recent_paths.is_empty(), "缺字段应是空表");
+}
+
 /// 工作区把配置读进来当默认布局：写一份配置后再建工作区，布局要跟着变。
 #[test]
 fn workspace_picks_up_saved_layout() {
@@ -90,6 +121,7 @@ fn workspace_picks_up_saved_layout() {
             ..d2r_core::LayoutSettings::default()
         },
         layout_confirmed: true,
+        ..Settings::default()
     };
     store.save(&settings).unwrap();
     let back = store.load().unwrap();
