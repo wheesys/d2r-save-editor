@@ -30,23 +30,9 @@ docs/     调研与开发记录
 **桌面端刻意不纳入 Cargo workspace**（见根 `Cargo.toml` 的 `exclude`）：
 Tauri 依赖较重，纳进来会拖慢核心 crate 的每次构建。
 
-## 数据依赖（重要）
-
-程序需要的**数据表与字符串表不在仓库里**，也不随仓库分发：
-
-- 构建时把这些数据**压缩后内嵌进可执行文件**（`tools/make-bundle.py`
-  生成，`crates/app/build.rs` 内嵌），所以终端用户只需本程序 + 存档文件；
-- 数据由**每个使用者在本机自行准备**（`tools/fetch-data.ps1`），
-  生成物统一落在 `samples/game-data/`，已被 `.gitignore` 排除；
-- 仓库与文档**不记录**这些数据的来源、清单、体积或文件名。
-
-> 贡献者请注意：**不要**在 issue、PR、文档或注释里提交本地数据的来源说明、
-> 文件清单、哈希或提取方法。涉及数据准备的内容请只留在本机。
-
-release 构建在缺少本地数据时会**直接失败**（`crates/app/build.rs` 的检查），
-避免发出一个打开就没数据的包。
-
 ## 构建与打包
+
+构建分两步：先准备本机资源包，再编译。
 
 ```powershell
 # 核心（workspace）
@@ -62,8 +48,8 @@ pwsh -File tools/package.ps1            # → dist/D2RSaveEditor-<版本>-win-x6
 pwsh -File tools/package.ps1 -AlsoZip   # 额外打一个 zip（含说明文件）
 ```
 
-流程：准备本地数据 → 构建前端 → release 构建 → 拷出单文件。
-数据在构建期先压缩再内嵌，所以 exe 体积远小于"数据原样内嵌"。
+流程：准备本机资源包 → 构建前端 → release 构建 → 拷出单文件。
+资源包在构建期先压缩，所以 exe 体积远小于原样打包。
 
 ### WebView2 数据目录
 

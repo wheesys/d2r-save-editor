@@ -33,3 +33,7 @@ desktop/src-tauri/target/
 # 临时提交信息
 commit-msg.tmp
 *.tmp
+
+# 本地开发记录：只在本机保留，不进仓库
+# （环境、资料清单、交接与待办等；不含源码相关内容）
+local-notes/

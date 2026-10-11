@@ -62,7 +62,7 @@ if (-not $Version) {
 $dist = Join-Path $repo 'dist'
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
-# 1) 数据包（会随 release 构建被内嵌进 exe）
+# 1) 本机资源包
 #
 # 默认策略：源数据在就重新生成，保证打进 exe 的是最新表；
 # 源数据不在才考虑复用现有数据包（-KeepBundle），且明确警告。
@@ -71,7 +71,7 @@ $srcData = Join-Path $repo 'samples\game-data\excel'
 $haveSrc = (Test-Path $srcData) -and ((Get-ChildItem $srcData -Filter *.txt -ErrorAction SilentlyContinue | Measure-Object).Count -gt 0)
 
 if ($haveSrc) {
-    Step '生成数据包（随后会被内嵌进 exe）'
+    Step '生成本机资源包'
     $py = (Get-Command python -ErrorAction SilentlyContinue).Source
     if (-not $py) {
         $cand = 'C:\Users\walle\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe'
@@ -103,7 +103,7 @@ if (-not (Test-Path $bundleMarker)) {
     throw "数据包不存在：$bundleMarker —— release 构建会失败"
 }
 $bundleMb = [math]::Round(((Get-ChildItem (Split-Path $bundleMarker) -Recurse -File | Measure-Object -Sum Length).Sum / 1MB), 2)
-Ok "数据包就绪（$bundleMb MB，将内嵌进 exe）"
+Ok "资源包就绪（$bundleMb MB）"
 
 # 2) 前端
 if (-not $SkipFrontend) {
@@ -129,7 +129,7 @@ try {
 $exe = Join-Path $repo 'desktop\src-tauri\target\release\d2r-desktop.exe'
 if (-not (Test-Path $exe)) { throw "找不到产物：$exe" }
 $exeMb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
-Ok "d2r-desktop.exe（$exeMb MB，数据已内嵌）"
+Ok "d2r-desktop.exe（$exeMb MB）"
 
 # 4) 产出单文件 exe（数据与界面资源都在里面，配套一份说明）
 Step '产出单文件 exe'
@@ -137,7 +137,7 @@ $outName = "D2RSaveEditor-$Version-win-x64.exe"
 $outExe = Join-Path $dist $outName
 Copy-Item $exe $outExe -Force
 $outMb = [math]::Round((Get-Item $outExe).Length / 1MB, 1)
-Ok "$outName（$outMb MB，单文件，数据已内嵌）"
+Ok "$outName（$outMb MB，单文件）"
 
 $usage = @"
 D2R 存档修改器 v$Version（Windows x64 单文件版）
@@ -188,21 +188,12 @@ https://github.com/wheesys/d2r-save-editor/issues
 提交问题时请附上：版本号、复现步骤、界面上的报错原文、截图；
 如果能说明"游戏里实际显示的是什么"会更快定位。
 
-版权
-----
-本程序：MIT License (c) 2026 wheesys，源码见上方链接。
+许可与免责
+----------
+MIT License (c) 2026 wheesys，源码见上方链接。
 
-程序运行需要游戏的数据表与字符串（用于把物品/技能代码显示成中文名），
-这些数据不在随附的源码里；程序只读取你本机的存档文件，
-不会修改游戏安装目录里的任何内容。
-
-《暗黑破坏神 II：重制版》(Diablo II: Resurrected) 及相关名称、素材、数据的
-版权归 Blizzard Entertainment 所有。本程序是非官方的第三方工具，
-与 Blizzard Entertainment 无任何关联，也未获其授权或认可。
-请自行确认在你的使用场景下这样做是否符合游戏的用户协议。
-
-免责：本程序按"现状"提供，不附带任何担保。改存档有风险，可能导致角色/物品
-损坏或无法进入游戏，请务必自己保留备份，后果由使用者自行承担。
+本程序按"现状"提供，不附带任何担保。改存档有风险，可能导致角色/物品损坏
+或无法进入游戏，请务必自己保留备份，后果由使用者自行承担。
 "@
 $usagePath = Join-Path $dist "使用说明-$Version.txt"
 Set-Content -Path $usagePath -Value $usage -Encoding UTF8
@@ -227,6 +218,5 @@ if ($AlsoZip) {
 
 Write-Host ''
 Write-Host "完成：$outExe" -ForegroundColor Green
-Write-Host "单文件 exe（$outMb MB，内含全部数据与界面资源）；配套说明：$usagePath" -ForegroundColor DarkGray
+Write-Host "单文件 exe（$outMb MB）；配套说明：$usagePath" -ForegroundColor DarkGray
 Write-Host ''
-Write-Host '提醒：exe 内含游戏数据，请只在你自己的范围内分发，不要上传到公开仓库或公开 Release。' -ForegroundColor Yellow
