@@ -133,11 +133,19 @@ pub fn layout_questions(state: State<'_, AppState>) -> R<Vec<String>> {
 }
 
 /// 用户确认/修改布局设置（会写进设置文件，下次启动直接带上）。
+///
+/// 写盘失败会返回错误——界面必须如实告诉用户"这次生效但下次会丢"，
+/// 不能像以前那样吞掉。
 #[tauri::command]
 pub fn set_layout(state: State<'_, AppState>, layout: d2r_core::LayoutSettings) -> R<()> {
-    // 注意：必须走返回 Result 的版本，它内部才会写盘。
-    // 之前这里忽略了返回值，导致"设了尺寸，重开又没了"。
     state.0.lock().unwrap().set_layout(layout)
+}
+
+/// 设置文件路径 + 上一次保存的结果（界面用来排查"设置没保存"）。
+#[tauri::command]
+pub fn settings_status(state: State<'_, AppState>) -> (String, Option<String>) {
+    let ws = state.0.lock().unwrap();
+    (ws.config_path(), ws.settings_note().map(|s| s.to_string()))
 }
 
 /// 按当前布局做越界校验。

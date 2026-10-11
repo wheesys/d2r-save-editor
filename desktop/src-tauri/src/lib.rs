@@ -62,6 +62,7 @@ pub fn run() {
             commands::layout_hints,
             commands::layout_questions,
             commands::set_layout,
+            commands::settings_status,
             commands::validate_bounds,
             commands::item_detail,
             commands::stat_catalog,

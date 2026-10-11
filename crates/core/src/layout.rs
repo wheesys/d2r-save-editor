@@ -11,8 +11,13 @@
 //! **推断不出来的就让用户勾选**，而不是猜。
 
 /// 存储布局设置（用户可改，也可来自推断）。
+///
+/// 每个字段都带 `#[serde(default)]`：以后加新设置项时，**旧配置文件仍然能读**
+/// （缺的字段用默认值）。没有这一层，加字段会让旧配置整份解析失败，
+/// 用户已保存的设置等于被丢掉——测试 `old_config_without_new_fields_still_loads`
+/// 盯的就是这件事。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct LayoutSettings {
     /// 背包每行格子数（原版 10）。
     pub inventory_cols: u32,
@@ -28,6 +33,12 @@ pub struct LayoutSettings {
     pub stash_rows: u32,
     /// 是否按"佣兵全装备"处理（mod 常见改动）。
     pub merc_full_equipment: bool,
+    /// 传送书/鉴定书是否只占一格（mod 常见改动：原版它们是 1×2）。
+    ///
+    /// 开启后**渲染与拖拽都按 1×1 算**（界面按这个值决定方块大小与落点），
+    /// 但**不改存档里的坐标数据**——那两件物品在存档里的位置语义不变，
+    /// 只是编辑器把它们当成 1 格来摆放与判越界。
+    pub books_single_cell: bool,
     /// 每个设置是否由用户显式指定（`false` 表示用的默认/推断值）。
     pub confirmed_by_user: bool,
 }
@@ -43,7 +54,26 @@ impl Default for LayoutSettings {
             stash_cols: 10,
             stash_rows: 10,
             merc_full_equipment: false,
+            books_single_cell: false,
             confirmed_by_user: false,
+        }
+    }
+}
+
+/// 哪些物品算"书"（mod 里常被改成只占一格）。
+///
+/// 只列传送书与鉴定书：卷轴（`tsc`/`isc`）本来就是 1×1，不需要处理。
+pub const BOOK_CODES: [&str; 2] = ["tbk", "ibk"];
+
+impl LayoutSettings {
+    /// 某物品在界面上的占格（考虑"书只占一格"的设置）。
+    ///
+    /// `base` 是从数据表读到的原始占格；命中书且开关打开时返回 1×1。
+    pub fn item_size(&self, code: &str, base: (u32, u32)) -> (u32, u32) {
+        if self.books_single_cell && BOOK_CODES.contains(&code) {
+            (1, 1)
+        } else {
+            base
         }
     }
 }

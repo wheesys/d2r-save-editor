@@ -28,3 +28,7 @@ path = "src/bin/grid_probe.rs"
 [[bin]]
 name = "quest-probe"
 path = "src/bin/quest_probe.rs"
+
+[[bin]]
+name = "write-diag"
+path = "src/bin/write_diag.rs"

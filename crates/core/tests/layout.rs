@@ -92,6 +92,7 @@ fn user_confirmed_layout_makes_bounds_reliable() {
     let (sx, sy) = hints.stash_max.unwrap();
     let (ix, iy) = hints.inventory_max.unwrap_or((9, 3));
     let fitted = LayoutSettings {
+        books_single_cell: false,
         // 留足余量（推断只给下限）：按最大坐标 + 1 再加一点
         inventory_cols: ix + 2,
         inventory_rows: iy + 2,
@@ -140,4 +141,49 @@ fn empty_merc_section_does_not_ask() {
             );
         }
     }
+}
+
+/// "书只占一格"的设置：只在开关打开时把传送书/鉴定书算成 1×1。
+#[test]
+fn books_single_cell_only_affects_books() {
+    let mut s = LayoutSettings::default();
+    assert!(!s.books_single_cell, "默认应是原版行为（书占 1×2）");
+
+    // 关闭时保持原始占格
+    assert_eq!(s.item_size("tbk", (1, 2)), (1, 2), "传送书默认 1×2");
+    assert_eq!(s.item_size("ibk", (1, 2)), (1, 2), "鉴定书默认 1×2");
+    assert_eq!(s.item_size("hp1", (1, 1)), (1, 1));
+
+    // 打开后书变 1×1，其它物品不受影响
+    s.books_single_cell = true;
+    assert_eq!(s.item_size("tbk", (1, 2)), (1, 1), "传送书应只占一格");
+    assert_eq!(s.item_size("ibk", (1, 2)), (1, 1), "鉴定书应只占一格");
+    assert_eq!(
+        s.item_size("amu", (1, 1)),
+        (1, 1),
+        "非书物品不该被改（护身符本来就 1×1）"
+    );
+    assert_eq!(
+        s.item_size("box", (2, 2)),
+        (2, 2),
+        "非书物品不该被改（盒子 2×2 要保持）"
+    );
+    // 卷轴本来就是 1×1，开不开都一样
+    assert_eq!(s.item_size("tsc", (1, 1)), (1, 1));
+}
+
+/// 旧配置文件缺字段也要能读（每加一个设置项都要保住这条）。
+#[test]
+fn layout_settings_ignore_missing_fields() {
+    // 只有 4 个字段的老配置
+    let json = r#"{"inventoryCols":16,"inventoryRows":8,"cubeCols":8,"cubeRows":8}"#;
+    let s: LayoutSettings = serde_json::from_str(json).expect("缺字段的旧配置应能读");
+    assert_eq!(
+        (s.inventory_cols, s.inventory_rows),
+        (16, 8),
+        "给出的字段要生效"
+    );
+    assert!(!s.books_single_cell, "缺的字段用默认值");
+    assert!(!s.merc_full_equipment);
+    assert_eq!((s.stash_cols, s.stash_rows), (10, 10));
 }

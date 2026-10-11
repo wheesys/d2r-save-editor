@@ -78,12 +78,12 @@ console.log("=== 1. 网格划分（物品该落在哪个容器）===");
   check("5 个容器", grids.length === 5, `实际 ${grids.length}`);
   // 装备位不再用行列网格，而是按游戏装备页的真实布局摆放（值见 EQUIP_SLOT_LAYOUT）
   check(
-    "装备位用装备页布局（约 215×145）",
+    "装备位用装备页布局（约 645×435，放大 3 倍）",
     byKey.Equip.doll !== undefined &&
-      byKey.Equip.doll.width > 200 &&
-      byKey.Equip.doll.width < 230 &&
-      byKey.Equip.doll.height > 135 &&
-      byKey.Equip.doll.height < 155,
+      byKey.Equip.doll.width > 600 &&
+      byKey.Equip.doll.width < 700 &&
+      byKey.Equip.doll.height > 400 &&
+      byKey.Equip.doll.height < 480,
     JSON.stringify(byKey.Equip.doll),
   );
   check("装备位没有可拖拽（槽位是固定的）", byKey.Equip.draggable === false);
@@ -189,9 +189,10 @@ console.log("=== 5. 装备位按游戏角色装备页布局 ===");
   );
   check("躯干比头大", torso.h > head.h, `躯干 h=${torso.h}，头 h=${head.h}`);
   check("戒指槽标为估算（虚线）", html.includes("estimated"));
+  // 装备页放大约 3 倍（原 215×145 → 约 645×435），所以装备位独占一行、背包在下面
   check(
-    "装备页画布约 215×145",
-    /width:(21[0-9])px;height:(14[0-9])px/.test(equipSeg),
+    "装备页放大约 3 倍（约 645×435）",
+    /width:(6[0-9][0-9])px;height:(4[0-9][0-9])px/.test(equipSeg),
     equipSeg.match(/style="width:\d+px;height:\d+px"/)?.[0] ?? "（没找到画布尺寸）",
   );
 }

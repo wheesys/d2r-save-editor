@@ -28,3 +28,4 @@ serde_json = "1"
 opt-level = 2
 lto = "thin"
 strip = true
+

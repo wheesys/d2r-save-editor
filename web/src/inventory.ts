@@ -100,11 +100,11 @@ const EQUIP_SLOT_LAYOUT: {
 /**
  * 装备页整体缩放。
  *
- * 布局表里原版装备页是 346×234（相对坐标），这里按 0.62 缩到约 215×145：
- * 这样它和背包（默认 10 格 = 340 宽）在窗口里各自占一行的位置，
- * 背包自然落到下面一行，不再是"挤在同一排、后半截看不到"。
+ * 布局表里原版装备页是 346×234（相对坐标）。这里放大到 **3 倍**：
+ * 装备槽约 43×160（双臂）、100×250（躯干）这种尺寸，图标看得清；
+ * 装备位因此独占一行，背包在下面（用户明确要这个层次）。
  */
-const EQUIP_SCALE = 0.62;
+const EQUIP_SCALE = 1.86;
 
 /** 缩放后的装备页尺寸。 */
 const EQUIP_DOLL_SIZE = {
@@ -219,10 +219,10 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
             it.socketCount > 0 ? `<span class="blk-sock">${it.socketedCount}/${it.socketCount}</span>` : "";
           const icon = iconOf(it.code);
           const art = icon
-            ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it.code)}" draggable="false" />`
+            ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it.code)}" />`
             : `<span class="blk-code">${escapeHtml(it.code)}</span>`;
           return `<div class="blk q-${it.quality.toLowerCase()}${sel}" style="${style}"
-        data-item="${it.index}" title="${escapeAttr(tooltip(it))}">
+        data-item="${it.index}" draggable="true" title="${escapeAttr(tooltip(it))}">
         ${art}
         <span class="blk-name">${escapeHtml(label)}</span>
         ${socketNote}
@@ -231,44 +231,7 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
         .join("");
 
   // 装备位：按真实布局摆放的槽位框（坐标来自 EQUIP_SLOT_LAYOUT）
-  let slotBoxes = "";
-  if (spec.slots) {
-    const bySlot = new Map<number, ItemDto>();
-    for (const it of mine) {
-      const idx = equipSlotIndex(it);
-      if (idx >= 0 && !bySlot.has(idx)) bySlot.set(idx, it);
-    }
-    slotBoxes = EQUIP_SLOT_LAYOUT.map((slot, i) => {
-      const it = bySlot.get(i);
-      const label = it ? itemLabel(it) : slot.label;
-      const sel = it && selected === it.index ? " selected" : "";
-      const cls = it ? `blk q-${it.quality.toLowerCase()}${sel}` : "blk empty";
-      const data = it ? ` data-item="${it.index}"` : "";
-      const note = slot.estimated ? "（位置为估算）" : "";
-      const title = it
-        ? escapeAttr(tooltip(it))
-        : `${slot.label}（空）${note}`;
-      const sock =
-        it && it.socketCount > 0
-          ? `<span class="blk-sock">${it.socketedCount}/${it.socketCount}</span>`
-          : "";
-      const icon = it ? iconOf(it.code) : "";
-      const art = icon
-        ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it ? it.code : "")}" draggable="false" />`
-        : `<span class="blk-code">${escapeHtml(it ? it.code : slot.label)}</span>`;
-      // 槽位按布局表的比例缩放定位；小槽（戒指/双手）不放名称，避免文字溢出
-      const w = Math.round(slot.w * EQUIP_SCALE);
-      const h = Math.round(slot.h * EQUIP_SCALE);
-      const showName = w >= 40 && !it;
-      return `<div class="${cls}${slot.estimated ? " estimated" : ""}"
-        style="left:${Math.round(slot.x * EQUIP_SCALE)}px;top:${Math.round(slot.y * EQUIP_SCALE)}px;width:${w}px;height:${h}px"
-        ${data} title="${title}">
-        ${art}
-        ${showName ? `<span class="blk-name">${escapeHtml(label)}</span>` : ""}
-        ${sock}
-      </div>`;
-    }).join("");
-  }
+  const slotBoxes = spec.slots ? renderSlotBoxes(mine, selected) : "";
 
   const oob = outOfBounds.length
     ? `<div class="oob">越界（坐标超出当前容器设置，可能是别的面板的物品）：` +
@@ -304,6 +267,66 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
 export function renderInventory(layout: LayoutSettings, items: ItemDto[], selected: number | null): string {
   const grids = buildGrids(layout, items);
   return grids.map((g) => renderGrid(g, items, selected)).join("");
+}
+
+/**
+ * 按游戏装备页布局画出槽位框（角色装备位与佣兵共用）。
+ *
+ * 佣兵的装备槽和角色的**是同一套**（头/颈/身/双臂/双手/戒指/腰/脚/手套），
+ * 所以两处共用这一个函数，尺寸也就自然一致。
+ */
+function renderSlotBoxes(mine: ItemDto[], selected: number | null): string {
+  const bySlot = new Map<number, ItemDto>();
+  for (const it of mine) {
+    const idx = equipSlotIndex(it);
+    if (idx >= 0 && !bySlot.has(idx)) bySlot.set(idx, it);
+  }
+  return EQUIP_SLOT_LAYOUT.map((slot, i) => {
+    const it = bySlot.get(i);
+    const label = it ? itemLabel(it) : slot.label;
+    const sel = it && selected === it.index ? " selected" : "";
+    const cls = it ? `blk q-${it.quality.toLowerCase()}${sel}` : "blk empty";
+    const data = it ? ` data-item="${it.index}"` : "";
+    const note = slot.estimated ? "（位置为估算）" : "";
+    const title = it ? escapeAttr(tooltip(it)) : `${slot.label}（空）${note}`;
+    const sock =
+      it && it.socketCount > 0
+        ? `<span class="blk-sock">${it.socketedCount}/${it.socketCount}</span>`
+        : "";
+    const icon = it ? iconOf(it.code) : "";
+    const art = icon
+      ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it ? it.code : "")}" />`
+      : `<span class="blk-code">${escapeHtml(it ? it.code : slot.label)}</span>`;
+    const w = Math.round(slot.w * EQUIP_SCALE);
+    const h = Math.round(slot.h * EQUIP_SCALE);
+    // 槽位够大才放名字（小槽放名字会溢出）
+    const showName = w >= 46 && !it;
+    return `<div class="${cls}${slot.estimated ? " estimated" : ""}" draggable="${it ? "true" : "false"}"
+      style="left:${Math.round(slot.x * EQUIP_SCALE)}px;top:${Math.round(slot.y * EQUIP_SCALE)}px;width:${w}px;height:${h}px"
+      ${data} title="${title}">
+      ${art}
+      ${showName ? `<span class="blk-name">${escapeHtml(label)}</span>` : ""}
+      ${sock}
+    </div>`;
+  }).join("");
+}
+
+/** 装备页画布尺寸（角色装备位与佣兵共用）。 */
+export function equipDollSize(): { width: number; height: number } {
+  return EQUIP_DOLL_SIZE;
+}
+
+/**
+ * 佣兵装备：用**与角色装备位完全相同**的布局与尺寸渲染。
+ *
+ * 佣兵段里的物品带 `bodyLocation`，所以能直接落到对应槽位；
+ * 这一点已用样本核对过（头/颈/身/右臂/右戒/腰/脚/手套都能对上）。
+ */
+export function renderMercDoll(items: ItemDto[], selected: number | null): string {
+  return `<div class="grid doll" data-cols="1" data-rows="1"
+    style="width:${EQUIP_DOLL_SIZE.width}px;height:${EQUIP_DOLL_SIZE.height}px">
+    ${renderSlotBoxes(items, selected)}
+  </div>`;
 }
 
 /** 块上显示的名称（太长会溢出，截断一下） */
@@ -344,9 +367,18 @@ export function bindGridDrag(
 ) {
   root.querySelectorAll<HTMLElement>(".blk[data-item]").forEach((el) => {
     el.addEventListener("click", () => onSelect(Number(el.dataset.item)));
-    el.draggable = true;
+    // 逐个判断所属容器能不能拖：道具块在 `.grid` 里、点的是数值网格就是可拖的；
+    // 点的是 `.doll`（装备页/佣兵，固定槽）就不给拖。
+    const grid = el.closest(".grid") as HTMLElement | null;
+    const canDrag = grid !== null && !grid.classList.contains("doll");
+    el.draggable = canDrag;
+    if (!canDrag) return;
     el.addEventListener("dragstart", (ev) => {
-      (ev as DragEvent).dataTransfer?.setData("text/plain", el.dataset.item!);
+      const dt = (ev as DragEvent).dataTransfer;
+      if (!dt) return;
+      dt.setData("text/plain", el.dataset.item!);
+      // 不设 effectAllowed 时某些环境拿不到 dropEffect，拖动看起来"没反应"
+      dt.effectAllowed = "move";
     });
   });
 

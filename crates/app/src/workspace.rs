@@ -292,7 +292,9 @@ impl Workspace {
         self.recent.retain(|p| p != path);
         self.recent.insert(0, path.to_string());
         self.recent.truncate(MAX_RECENT);
-        self.save_settings();
+        // 记路径是"顺手存一下"，写盘失败不该影响打开存档这个动作本身；
+        // 失败原因已经在 save_settings 里记进 config_note，界面能查到。
+        let _ = self.save_settings();
     }
 
     /// 最近打开的存档路径（最新的在最前）。
@@ -452,15 +454,15 @@ impl Workspace {
         &self.layout
     }
 
-    /// 用户确认/修改布局设置，并**存到磁盘**。
+    /// 用户确认/修改布局设置。
     ///
-    /// 布局是 mod 级的东西，同机所有角色共用一套，所以整机存一份：
-    /// 下次打开任何角色都直接带上，不用再填一次。
+    /// 内存里一定生效；**写盘失败会把错误返回给调用方**，让界面能如实提示——
+    /// 之前这里吞掉了失败、永远返回 `Ok(())`，于是界面显示"布局已确认"，
+    /// 磁盘上却什么都没写，重开就丢（用户实际遇到的"容器布局没保存"）。
     pub fn set_layout(&mut self, mut s: LayoutSettings) -> Result<(), AppError> {
         s.confirmed_by_user = true;
         self.layout = s;
-        self.save_settings();
-        Ok(())
+        self.save_settings()
     }
 
     /// 配置文件路径（界面上显示出来，方便用户知道设置存哪了）。
@@ -470,17 +472,27 @@ impl Workspace {
 
     /// 把当前设置写盘。
     ///
-    /// **不因为写失败而让操作失败**：设置已经在内存里生效了，
-    /// 存不下来最多是"下次要重填"，不该把用户卡住。所以只记录一条提示。
-    fn save_settings(&mut self) {
+    /// 写失败时把原因同时记进 `config_note`（界面会显示）并**作为错误返回**。
+    fn save_settings(&mut self) -> Result<(), AppError> {
         let settings = crate::config::Settings {
             layout: self.layout.clone(),
             layout_confirmed: self.layout.confirmed_by_user,
             recent_paths: self.recent.clone(),
         };
         match self.config.save(&settings) {
-            Ok(p) => self.config_note = Some(format!("设置已保存到 {}", p.display())),
-            Err(e) => self.config_note = Some(format!("设置没能存盘（{e}），下次启动需要重新确认")),
+            Ok(p) => {
+                self.config_note = Some(format!("设置已保存到 {}", p.display()));
+                Ok(())
+            }
+            Err(e) => {
+                let note = format!(
+                    "设置没能存盘（{e}）。设置这次仍然生效，但**下次启动会丢**。\
+                     配置文件打算写到 {}，请检查该目录是否可写。",
+                    self.config.path().display()
+                );
+                self.config_note = Some(note.clone());
+                Err(AppError::invalid(note))
+            }
         }
     }
 
@@ -515,7 +527,10 @@ impl Workspace {
             .into_iter()
             .map(|d| {
                 let n = namer.resolve(&d.code, &d.quality, d.quality_index);
-                let (w, h) = size_map.get(&d.code).copied().unwrap_or((1, 1));
+                // "书只占一格"的设置在这里生效：渲染与拖拽都按这个尺寸走
+                let (w, h) = self
+                    .layout
+                    .item_size(&d.code, size_map.get(&d.code).copied().unwrap_or((1, 1)));
                 ItemDto {
                     index: d.index,
                     code: d.code,
@@ -606,7 +621,11 @@ impl Workspace {
         let size_map = crate::bundle::item_size_map();
         let mut namer = ItemNamer::new(&self.strings, &mut self.tables, self.lang.clone());
         let n = namer.resolve(&detail.code, &detail.quality, detail.quality_index);
-        let (w, h) = size_map.get(&detail.code).copied().unwrap_or((1, 1));
+        // 同样考虑"书只占一格"的设置，否则弹窗里的占格会和网格里显示的不一致
+        let (w, h) = self.layout.item_size(
+            &detail.code,
+            size_map.get(&detail.code).copied().unwrap_or((1, 1)),
+        );
         let mut stats: Vec<ItemStatDto> = detail
             .stats
             .iter()

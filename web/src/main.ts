@@ -1,6 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import { bindGridDrag, escapeAttr, escapeHtml, renderInventory, setItemIcons } from "./inventory";
+import {
+  bindGridDrag,
+  escapeAttr,
+  escapeHtml,
+  renderInventory,
+  renderMercDoll,
+  setItemIcons,
+} from "./inventory";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import {
@@ -639,10 +646,10 @@ async function completeAllQuests() {
 }
 
 /**
- * 佣兵：把存档**佣兵段**里的物品按身体槽位画出来。
+ * 佣兵：用**与角色装备位完全相同**的布局渲染。
  *
- * 佣兵段与主物品列表分开存储，所以这里用的是佣兵段自己的序号；
- * 图标/名字按物品代码解析（与物品栏一致）。
+ * 佣兵段与主物品列表分开存储，序号互不相干，所以点击时必须带 `mercenary` 目标，
+ * 否则会按同一个序号改到主列表的物品。
  */
 let mercItems: ItemDetailDto[] = [];
 function renderMerc() {
@@ -652,39 +659,18 @@ function renderMerc() {
     $("#merc-section").classList.remove("hidden");
     return;
   }
-  const slotLabel: Record<string, string> = {
-    Head: "头", Neck: "颈", Torso: "身", RightArm: "右臂", LeftArm: "左臂",
-    RightRing: "右戒", LeftRing: "左戒", Gloves: "手", Belt: "腰", Feet: "脚",
-  };
-  host.innerHTML = mercItems
-    .map((d) => {
-      const it = d.item;
-      const icon = iconFor(it.code);
-      return `<div class="merc-card" data-merc-index="${it.index}">
-         ${icon}
-         <span class="merc-slot">${escapeHtml(slotLabel[it.bodyLocation] ?? it.bodyLocation)}</span>
-         <span class="merc-body">
-           <b>${escapeHtml(it.name || it.code)}</b>
-           <span class="muted">${escapeHtml(it.code)}｜品质 ${escapeHtml(it.quality)}｜等级 ${it.level}｜属性 ${it.statsCount} 条${
-             it.socketCount > 0 ? `｜孔 ${it.socketedCount}/${it.socketCount}` : ""
-           }</span>
-         </span>
-         <span class="merc-edit">点此编辑</span>
-       </div>`;
-    })
-    .join("");
-  // 佣兵条目也要能打开属性弹窗——必须带佣兵目标，否则会按同一个序号改到主列表
-  host.querySelectorAll<HTMLElement>("[data-merc-index]").forEach((el) => {
-    el.addEventListener("click", () => void selectItem(Number(el.dataset.mercIndex), "mercenary"));
+  // 佣兵物品带 bodyLocation，直接复用装备页布局（尺寸与角色装备位一致）
+  host.innerHTML = renderMercDoll(
+    mercItems.map((d) => d.item),
+    selectedTarget === "mercenary" ? selectedItem : null,
+  );
+  host.querySelectorAll<HTMLElement>(".blk[data-item]").forEach((el) => {
+    el.addEventListener("click", () => void selectItem(Number(el.dataset.item), "mercenary"));
   });
   $("#merc-section").classList.remove("hidden");
 }
 
-/** 按代码取物品图标（没有就返回空串，界面会退化成只显示文字） */
-function iconFor(code: string): string {
-  const icon = itemIcons[code];
-  return icon ? `<img class="merc-icon" src="${icon}" alt="" draggable="false" />` : "";
-}
+
 
 async function applyEdits(edits: Edit[], label: string) {
   if (edits.length === 0) {
@@ -717,6 +703,7 @@ async function refreshLayout() {
     ($("#l-stash-cols") as HTMLInputElement).value = String(settings.stashCols);
     ($("#l-stash-rows") as HTMLInputElement).value = String(settings.stashRows);
     ($("#l-merc") as HTMLInputElement).checked = settings.mercFullEquipment;
+    ($("#l-books") as HTMLInputElement).checked = settings.booksSingleCell;
     // 记住布局并刷新容器网格：网格尺寸（背包/方块/箱子行列数）全部来自它。
     // 漏了赋值会让 renderContainerView 恒早退，容器视图根本不渲染。
     currentLayout = settings;
@@ -756,6 +743,12 @@ async function refreshLayout() {
 /** 打开设置弹窗（设置与存档无关，所以随时可开）。 */
 async function openSettingsModal() {
   $("#settings-modal").classList.remove("hidden");
+  try {
+    const [path, note] = await call<[string, string | null]>("settings_status");
+    $("#settings-path").textContent = note ?? `设置文件：${path}`;
+  } catch {
+    $("#settings-path").textContent = "";
+  }
   $("#bounds-result").textContent = "";
   await refreshLayout();
 }
@@ -774,14 +767,21 @@ async function applyLayout() {
     stashCols: Number(($("#l-stash-cols") as HTMLInputElement).value),
     stashRows: Number(($("#l-stash-rows") as HTMLInputElement).value),
     mercFullEquipment: ($("#l-merc") as HTMLInputElement).checked,
+    booksSingleCell: ($("#l-books") as HTMLInputElement).checked,
     confirmedByUser: true,
   };
   try {
     await call<void>("set_layout", { layout });
-    toast("布局已确认。之后保存时按这套尺寸做越界校验。");
     await refreshLayout();
+    // 如实报告存到哪了：写盘失败时 set_layout 会抛错，走下面的分支
+    const [path, note] = await call<[string, string | null]>("settings_status");
+    $("#bounds-result").innerHTML =
+      `<span class="ok">布局已应用</span>｜${escapeHtml(note ?? `设置文件：${path}`)}`;
+    toast("布局已确认。之后保存时按这套尺寸做越界校验。");
   } catch (e) {
-    showError(e, "应用布局失败");
+    // 写盘失败：设置这次仍然生效，但下次启动会丢，必须说清
+    showError(e, "布局已应用，但**没能保存到磁盘**（下次启动会恢复默认）");
+    await refreshLayout();
   }
 }
 
@@ -858,15 +858,12 @@ async function checkAlreadyOpen() {
  * 后端不可用时静默跳过，网格会退化成只显示物品代码。
  */
 let iconsLoaded = false;
-/** 图标缓存（佣兵页也用它，所以 main.ts 里留一份） */
-let itemIcons: Record<string, string> = {};
 async function loadIcons() {
   if (iconsLoaded) return;
   try {
     const icons = await call<[string, string][]>("item_icons");
     if (icons.length === 0) return;
     setItemIcons(icons);
-    itemIcons = Object.fromEntries(icons);
     iconsLoaded = true;
     renderContainerView();
     renderMerc();

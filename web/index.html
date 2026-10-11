@@ -155,6 +155,8 @@
           这些设置与存档无关，改一次会记住（下次启动自动带上）。
         </p>
         <div id="layout-questions" class="questions"></div>
+        <!-- 设置文件路径 / 上次保存结果：排查"设置没保存"时用 -->
+        <div id="settings-path" class="muted"></div>
         <div class="grid">
           <label>背包列数 <input id="l-inv-cols" type="number" min="1" max="64" /></label>
           <label>背包行数 <input id="l-inv-rows" type="number" min="1" max="64" /></label>
@@ -163,6 +165,9 @@
           <label>箱子列数 <input id="l-stash-cols" type="number" min="1" max="64" /></label>
           <label>箱子行数 <input id="l-stash-rows" type="number" min="1" max="64" /></label>
           <label class="inline"><input type="checkbox" id="l-merc" /> 佣兵全装备（mod）</label>
+          <label class="inline">
+            <input type="checkbox" id="l-books" /> 传送书/鉴定书只占一格（mod）
+          </label>
         </div>
         <div class="actions">
           <button id="btn-apply-layout" class="primary">确认并应用布局</button>

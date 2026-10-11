@@ -516,19 +516,64 @@ impl EditSession {
     }
 
     /// 保存到指定路径（先校验，通过才落盘；自动备份原文件）。
+    ///
+    /// ## 为什么备份这一步要写得这么啰嗦
+    ///
+    /// 曾有用户保存时收到"备份失败 … 拒绝访问 (os error 5)"，而同一条路径在别处
+    /// 复制完全正常——`std::fs::copy` 失败的具体原因（被占用、被安全软件拦、
+    /// 目标属性异常）从错误里看不出区别。所以这里改成：
+    ///
+    /// 1. 备份文件名带序号，**不覆盖已存在的备份**（保留历史，也避开"目标已存在"
+    ///    这类被安全软件盯上的写入模式）；
+    /// 2. `copy` 失败就换"读进内存再写出去"这条等价路径再试一次——
+    ///    两者系统调用不同，能绕过一部分拦截；
+    /// 3. 仍然失败时，错误信息里带上**路径、目录是否可写、目标是否已存在**，
+    ///    让用户和排查者一眼看出是权限还是占用。
     pub fn save_as(&self, dest: impl AsRef<Path>) -> Result<PathBuf, EditError> {
         let dest = dest.as_ref();
         let (bytes, _roundtrip) = self.verify()?;
 
-        // 备份原文件（若目标已存在）
         if dest.exists() {
-            let backup = dest.with_extension("d2s.bak");
-            std::fs::copy(dest, &backup)
-                .map_err(|e| EditError::Write(format!("备份失败 {}：{e}", backup.display())))?;
+            self.backup(dest)?;
         }
         std::fs::write(dest, &bytes)
             .map_err(|e| EditError::Write(format!("写入失败 {}：{e}", dest.display())))?;
         Ok(dest.to_path_buf())
+    }
+
+    /// 备份原文件，返回实际写出的备份路径。
+    pub fn backup(&self, dest: &Path) -> Result<PathBuf, EditError> {
+        let original = std::fs::read(dest)
+            .map_err(|e| EditError::Write(format!("读取原文件失败 {}：{e}", dest.display())))?;
+
+        let mut last_error = String::new();
+        // 依次尝试带序号的备份名，最多 99 个；都不行才报错
+        for n in 1..=99u32 {
+            let backup = backup_path(dest, n);
+            match write_backup(&backup, &original) {
+                Ok(()) => return Ok(backup),
+                Err(e) => {
+                    // 目标已存在就换下一个序号，其它错误记下来继续试一次别的写法
+                    last_error = format!("{e}");
+                }
+            }
+        }
+        Err(EditError::Write(format!(
+            "备份失败，已尝试 99 个备份名（{} … {}）。最后一个错误：{}\n\
+             原文件：{}（{} 字节，可读）\n\
+             所在目录：{}（{}）\n\
+             提示：若目录显示「存在但不可写」，通常是安全软件/受控文件夹拦了写入；\
+             备份失败时不会动原文件，你的存档没有被改。",
+            backup_path(dest, 1).display(),
+            backup_path(dest, 99).display(),
+            last_error,
+            dest.display(),
+            original.len(),
+            dest.parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            describe_dir(dest.parent()),
+        )))
     }
 
     /// 保存回源文件。
@@ -538,6 +583,65 @@ impl EditSession {
             .clone()
             .ok_or_else(|| EditError::Write("没有源路径，请用 save_as".into()))?;
         self.save_as(path)
+    }
+}
+
+/// 第 `n` 个备份文件名：`小五.d2s` → `小五.d2s.bak`（n=1）、`小五.d2s.2.bak`（n>1）。
+fn backup_path(dest: &Path, n: u32) -> PathBuf {
+    let name = dest
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "save".into());
+    let file = if n <= 1 {
+        format!("{name}.bak")
+    } else {
+        format!("{name}.{n}.bak")
+    };
+    dest.with_file_name(file)
+}
+
+/// 写备份：先 `copy` 语义（这里用"读到的字节写出去"），失败再试另一条路径。
+///
+/// 两条路径的写法不同（`write` vs `OpenOptions::create_new`），
+/// 系统调用层不一样，能绕过一部分拦截。
+fn write_backup(backup: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if backup.exists() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "备份文件已存在",
+        ));
+    }
+    match std::fs::write(backup, bytes) {
+        Ok(()) => Ok(()),
+        Err(first) => {
+            // 换一条：显式 create_new（不与"覆盖"沾边，某些安全软件对覆盖更敏感）
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(backup)?;
+            f.write_all(bytes).map_err(|_| first)?;
+            f.flush()
+        }
+    }
+}
+
+/// 描述目录状态（排查权限问题用）。
+fn describe_dir(dir: Option<&Path>) -> String {
+    let Some(dir) = dir else {
+        return "（没有父目录）".into();
+    };
+    if !dir.is_dir() {
+        return "不存在".into();
+    }
+    // 试着建一个临时文件——这是判断"可写"最直接的办法
+    let probe = dir.join(".d2r-write-probe");
+    match std::fs::write(&probe, b"") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            "存在且可写".into()
+        }
+        Err(e) => format!("存在但不可写（{e}）"),
     }
 }
 

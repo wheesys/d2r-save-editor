@@ -147,6 +147,8 @@ export interface LayoutSettings {
   stashCols: number;
   stashRows: number;
   mercFullEquipment: boolean;
+  /** 传送书/鉴定书只占一格（mod 改动；开启后渲染与拖拽都按 1×1） */
+  booksSingleCell: boolean;
   confirmedByUser: boolean;
 }
 
