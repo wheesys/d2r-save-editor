@@ -18,6 +18,7 @@ import {
   type ItemDto,
   type ItemEdit,
   type ItemStats,
+  type ItemStatDto,
   type BundleInfo,
   type ItemDetailDto,
   type StatCatalogEntry,
@@ -444,6 +445,22 @@ function closeItemModal() {
   pendingDetailEdits.length = 0;
 }
 
+/**
+ * 属性值在输入框里显示成什么文本。
+ *
+ * 走多路兜底：正常用 `value`（存档里的整数）；万一某个字段缺失，
+ * 退到 `displayValue`，再不行给个空串。
+ *
+ * 为什么要兜底：曾经出现过"整列空白"，而原因是取了一个不存在的字段
+ * （`undefined` 渲染成空）。多一层兜底至少能立刻看出是数据问题还是渲染问题。
+ */
+function statValueText(s: ItemStatDto): string {
+  if (typeof s.value === "number" && Number.isFinite(s.value)) return String(s.value);
+  const dv = (s as unknown as { displayValue?: unknown }).displayValue;
+  if (typeof dv === "number" && Number.isFinite(dv)) return String(dv);
+  return "";
+}
+
 /** 渲染明细面板 */
 function renderItemDetail(detail: ItemDetailDto) {
   const it = detail.item;
@@ -479,7 +496,13 @@ function renderItemDetail(detail: ItemDetailDto) {
         parts.push("按等级加成（游戏内按 值 × 等级 / 8 生效）");
       }
       if (s.rangeText) parts.push(`有效范围 ${s.rangeText}`);
-      // 带参数属性的参数含义（如"获得 5 级「Holy Shock」光环"）
+      // 带参数位的属性有**两个变量**：数值 + 层。两个都要展示，
+      // 否则同一件物品上会出现两行看起来一样的属性（层不同、数值相同），
+      // 用户无法区分（用户实际提过这个问题）。
+      if (s.hasLayer) {
+        parts.push(`层 ${s.layer}`);
+      }
+      // 参数含义（如"获得 31 级「狂热」光环"、"法师 技能等级 +7"）
       if (s.paramLabel) parts.push(s.paramLabel);
       if (!s.userVisible) parts.push("内部字段");
       const note = parts.length
@@ -492,6 +515,9 @@ function renderItemDetail(detail: ItemDetailDto) {
       // step/min 不匹配时，Chromium 会**把输入框画成空白**（值只在 DOM 属性里），
       // 看起来就像"值没显示"。范围校验由我们自己的
       // `statValueProblem()` + 后端两处负责，不依赖浏览器。
+      //
+      // 取值走 `statValueText()`：万一某个字段缺失也不会渲染成空白，
+      // 至少能看到一个能对上的数字（排查时吃过"整列空白"的亏）。
       const hint =
         s.minValue !== null && s.maxValue !== null
           ? `范围 ${s.minValue} ~ ${s.maxValue}`
@@ -500,7 +526,7 @@ function renderItemDetail(detail: ItemDetailDto) {
         <td>${s.id}</td>
         <td${nameCls}>${s.name}${s.userVisible ? "" : " <span class='muted'>(内部字段)</span>"}</td>
         <td class="muted">${s.internal}</td>
-        <td><input type="text" inputmode="numeric" class="cell-input" value="${s.value}"
+        <td><input type="text" inputmode="numeric" class="cell-input" value="${escapeAttr(statValueText(s))}"
           data-stat-id="${s.id}" data-stat-layer="${s.layer}"
           data-min="${s.minValue ?? ""}" data-max="${s.maxValue ?? ""}"
           data-step="${s.displayStep}" title="${escapeAttr(hint)}" /></td>

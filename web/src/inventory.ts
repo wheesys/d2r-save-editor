@@ -368,7 +368,14 @@ export function bindGridDrag(
   onMove: (index: number, page: string, col: number, row: number) => void,
 ) {
   root.querySelectorAll<HTMLElement>(".blk[data-item]").forEach((el) => {
-    el.addEventListener("click", () => onSelect(Number(el.dataset.item)));
+    // **右键**打开属性弹窗，左键留给拖拽。
+    //
+    // 以前是左键打开，结果"拖完一松手就弹出属性窗"（用户反馈）。
+    // 拖拽本来就用左键按住，所以两者用不同按键彻底分开。
+    el.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      onSelect(Number(el.dataset.item));
+    });
     // **不要设 `draggable`**：WebView2 里设了它的元素会把 click 吞掉，
     // 表现就是"背包里的物品点不开属性弹窗"（身上的装备在 .doll 里不受影响）。
     // 拖拽改用下面的指针事件实现，不需要 HTML5 拖放。
@@ -376,7 +383,10 @@ export function bindGridDrag(
   });
 
   root.querySelectorAll<HTMLElement>(".oob-item").forEach((el) => {
-    el.addEventListener("click", () => onSelect(Number(el.dataset.item)));
+    el.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      onSelect(Number(el.dataset.item));
+    });
   });
 
   bindPointerDrag(root, items, onMove);

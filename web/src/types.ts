@@ -194,8 +194,10 @@ export interface ItemStatDto {
   displayValue: number;
   /** 输入框最小变化量（按等级的是 1/2^op_param，生命为 0.125） */
   displayStep: number;
-  /** 带参数属性的参数含义（如"获得 5 级「Holy Shock」光环"）；解不出时为 null */
+  /** 带参数属性的参数含义（如"获得 31 级「狂热」光环"）；解不出时为 null */
   paramLabel: string | null;
+  /** 是否带参数位（带的话有"层"这个第二变量，必须一起展示） */
+  hasLayer: boolean;
 }
 
 export interface ItemDetailDto {

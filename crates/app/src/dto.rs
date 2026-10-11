@@ -261,6 +261,12 @@ pub struct ItemStatDto {
     ///
     /// 例如 `item_aura` 的参数是光环，界面可显示成"获得 N 级 XXX 光环"。
     pub param_label: Option<String>,
+    /// 该属性是否带参数位（`Save Param Bits > 0`）。
+    ///
+    /// 带参数位的属性有**两个变量**：数值 + 层（layer），两个都要展示，
+    /// 否则同一件物品上会出现两行看起来一模一样的属性
+    /// （层不同、数值相同），用户无法区分。
+    pub has_layer: bool,
 }
 
 /// 一件物品的完整明细（界面的物品编辑面板用）。

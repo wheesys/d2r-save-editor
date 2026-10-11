@@ -1340,6 +1340,10 @@ fn cmd_item(args: &[String]) -> ExitCode {
         if s.display_step > 1.0 {
             notes.push(format!("取值须是 {} 的倍数", s.display_step as i64));
         }
+        // 带参数位的属性有**两个变量**：数值 + 层，两个都要给出
+        if s.has_layer {
+            notes.push(format!("层 {}", s.layer));
+        }
         // 参数含义（如"获得 31 级「狂热」光环"）——比"含参数"有用得多
         if let Some(pl) = &s.param_label {
             notes.push(pl.clone());

@@ -40,3 +40,7 @@ path = "src/bin/config_diag.rs"
 [[bin]]
 name = "fieldcheck"
 path = "src/bin/fieldcheck.rs"
+
+[[bin]]
+name = "jsondump"
+path = "src/bin/jsondump.rs"

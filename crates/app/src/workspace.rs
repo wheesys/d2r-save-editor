@@ -481,56 +481,38 @@ impl Workspace {
             .collect()
     }
 
-    /// 带参数属性的参数含义（把 `layer` 翻译成人看得懂的名字）。
+    /// 技能 ID → **本地化名字**（供参数解析用）。
     ///
-    /// 参数位存的是**另一个命名空间里的 ID**，和技能 ID 不是一回事，
-    /// 所以不能一股脑按技能表查。目前只解最常用的一类：
-    /// `item_aura`（装备时获得光环）——参数是光环 ID，值是该光环的等级。
-    /// 游戏里的模板是 `ModitemAura = "装备时获得%d级%s光环"`。
-    ///
-    /// 认不出来的参数一律返回 `None`，由界面原样显示层号，
-    /// **不猜**（猜错会让人看不懂这行到底在说什么）。
-    fn param_label(&mut self, id: u16, value: i64, layer: i32) -> Option<String> {
-        let limit = self.stat_limits.get(id)?;
-        if !limit.has_param_bits {
-            return None;
-        }
-        // 参数位的值是**另一个命名空间里的 ID**：`item_aura` 的层是光环 ID
-        // （样本里的 122/123 正好对上 Fanaticism(*Id 122) / Conviction(*Id 123)），
-        // 而数值部分是光环等级（31 级合理，122 级不合理，所以两者不能互换）。
-        let param = layer.max(0) as u16;
-        match id {
-            // item_aura：层 = 光环 ID，值 = 等级。模板 ModitemAura = "获得%d级%s光环"
-            151 => {
-                let aura = self.skill_name_by_id(param)?;
-                Some(format!("获得 {value} 级「{aura}」光环"))
-            }
-            // item_addclassskills：层是职业行号
-            83 => {
-                let class = self.class_name_by_code(param)?;
-                Some(format!("{class} 技能等级 +{value}"))
-            }
-            // item_singleskill / item_nonclassskill：层是技能 ID
-            107 | 97 => {
-                let skill = self.skill_name_by_id(param)?;
-                Some(format!("技能「{skill}」+{value}"))
-            }
-            _ => None,
-        }
-    }
-
-    /// 按技能 ID 取**显示名**（本地化）。
-    fn skill_name_by_id(&mut self, skill_id: u16) -> Option<String> {
+    /// 抽出来是因为属性列表的渲染闭包里已有 `&self` 借用，
+    /// 不能再调 `&mut self` 的方法；所以先算好映射再进闭包。
+    fn skill_local_names(&mut self) -> std::collections::HashMap<u16, String> {
+        use std::collections::HashMap;
+        let ids: Vec<u16> = {
+            let Some(table) = self.tables.get("skills") else {
+                return HashMap::new();
+            };
+            (0..table.len())
+                .filter_map(|row| table.int(row, "*Id").filter(|v| *v >= 0).map(|v| v as u16))
+                .collect()
+        };
         let namer = SkillNamer::new(&mut self.tables, &self.strings, self.lang.clone());
-        namer.name_by_id(skill_id)
+        ids.into_iter()
+            .filter_map(|id| namer.name_by_id(id).map(|n| (id, n)))
+            .collect()
     }
 
-    /// 按 `PlayerClass.txt` 的行号取职业显示名（参数位存的是行号）。
-    fn class_name_by_code(&mut self, row_index: u16) -> Option<String> {
-        let table = self.tables.get("PlayerClass")?;
-        table
-            .cell_nonempty(row_index as usize, "Player Class")
-            .map(str::to_string)
+    /// `PlayerClass.txt` 行号 → **中文职业名**。
+    fn class_local_names(&mut self) -> std::collections::HashMap<u16, String> {
+        use std::collections::HashMap;
+        let Some(table) = self.tables.get("PlayerClass") else {
+            return HashMap::new();
+        };
+        (0..table.len())
+            .filter_map(|row| {
+                let english = table.cell_nonempty(row, "Player Class")?;
+                Some((row as u16, class_name_zh(english).to_string()))
+            })
+            .collect()
     }
 
     /// 技能名（`skills.txt` 的 `skill` 列英文值）→ 技能 ID。
@@ -809,6 +791,10 @@ impl Workspace {
             &detail.code,
             size_map.get(&detail.code).copied().unwrap_or((1, 1)),
         );
+        // 参数解析需要的两张映射先算好：闭包里已有 `&self` 借用，
+        // 不能再调 `&mut self` 的方法（会借用冲突）。
+        let skill_names = self.skill_local_names();
+        let class_names = self.class_local_names();
         let mut stats: Vec<ItemStatDto> = detail
             .stats
             .iter()
@@ -836,7 +822,11 @@ impl Workspace {
                     id: *id,
                     layer: *layer,
                     value: *value,
-                    name: self.stat_namer.display_or_id(*id),
+                    // 带参数位的属性：同一族用**不同字符串键**区分层
+                    // （item_addclassskills 的层是职业，键是 ModStr3a/b/c…）。
+                    // 直接用表里的 descstrpos 会让所有职业都显示成第一个
+                    // （"亚马逊技能等级"），所以按层改写键。
+                    name: resolve_stat_name(&self.stat_namer, info, *id, *layer, &class_names),
                     internal: info.map(|s| s.internal.clone()).unwrap_or_default(),
                     step: info.map(|s| s.step).unwrap_or(1),
                     has_param_bits: info.map(|s| s.has_param_bits).unwrap_or(false),
@@ -847,7 +837,14 @@ impl Workspace {
                     per_level,
                     display_value: display,
                     display_step: limit.map(|l| l.user_step()).unwrap_or(1.0),
-                    param_label: self.param_label(*id, *value, *layer),
+                    param_label: param_label_from(
+                        *id,
+                        *value,
+                        (*layer).max(0) as u16,
+                        &skill_names,
+                        &class_names,
+                    ),
+                    has_layer: info.map(|s| s.has_param_bits).unwrap_or(false),
                 }
             })
             .collect();
@@ -1230,6 +1227,87 @@ impl Workspace {
     }
 }
 
+/// 属性显示名的解析（带参数位的属性要按层给出对应职业的名字）。
+///
+/// ## 为什么不用数据里的字符串键
+///
+/// `item_addclassskills` 的 `descstrpos` 是 `ModStr3a`，而数据里
+/// 按职业分了 `ModStr3a/b/c/d/e`（亚马逊/圣骑士/死灵法师/法师/野蛮人）。
+/// 直接读表里那一个键，所有职业都会显示成"亚马逊技能等级"（用户反馈过）。
+///
+/// 但**只有 5 个职业有键**：德鲁伊/刺客/术士缺失，他们的物品会退回成
+/// "亚马逊技能等级"（更错）。而且键里法师写作"巫师"，与界面用词不一致。
+///
+/// 所以这里**直接用职业名拼**：`<职业>技能等级`。对所有职业都对，
+/// 也不依赖数据里有没有那个键（拼法与字符串表里的既有文本一致）。
+fn resolve_stat_name(
+    _namer: &d2r_data::StatNamer,
+    _info: Option<&d2r_data::StatName>,
+    id: u16,
+    layer: i32,
+    classes: &std::collections::HashMap<u16, String>,
+) -> String {
+    let fallback = || _namer.display_or_id(id);
+    // 只有 item_addclassskills 这一族确认过"层 = 职业行号"，
+    // 别的属性不猜（猜错会让用户看不懂这行在说什么）。
+    if id != 83 {
+        return fallback();
+    }
+    match classes.get(&(layer.max(0) as u16)) {
+        Some(class_zh) => format!("{class_zh}技能等级"),
+        None => fallback(),
+    }
+}
+
+/// 解析带参数属性的**参数含义**（纯函数，便于在借用受限处调用）。
+///
+/// `id` 是属性 ID，`value` 是数值，`param` 是层（参数位）的值。
+/// 逐条确认过的规则见属性列表渲染处与 `Workspace::param_label` 的说明。
+/// 认不出来返回 `None`，由界面原样显示层号，**不猜**。
+fn param_label_from(
+    id: u16,
+    value: i64,
+    param: u16,
+    skills: &std::collections::HashMap<u16, String>,
+    classes: &std::collections::HashMap<u16, String>,
+) -> Option<String> {
+    match id {
+        // item_aura：层 = 光环 ID，值 = 等级。模板 `ModitemAura = "获得%d级%s光环"`
+        151 => {
+            let aura = skills.get(&param)?;
+            Some(format!("获得 {value} 级「{aura}」光环"))
+        }
+        // item_addclassskills：层 = PlayerClass 行号
+        83 => {
+            let class = classes.get(&param)?;
+            Some(format!("{class} 技能等级 +{value}"))
+        }
+        // item_singleskill / item_nonclassskill：层 = 技能 ID
+        107 | 97 => {
+            let skill = skills.get(&param)?;
+            Some(format!("技能「{skill}」+{value}"))
+        }
+        _ => None,
+    }
+}
+
+/// 职业名的中文（`PlayerClass.txt` 的 `Player Class` 列 → 中文）。
+///
+/// 参数位里存的是**职业行号**，展示时必须让用户看懂是哪个职业；
+/// 数据表里只有英文名。认不出来时原样返回英文，不猜。
+fn class_name_zh(english: &str) -> &str {
+    match english {
+        "Amazon" => "亚马逊",
+        "Sorceress" => "法师",
+        "Necromancer" => "死灵法师",
+        "Paladin" => "圣骑士",
+        "Barbarian" => "野蛮人",
+        "Druid" => "德鲁伊",
+        "Assassin" => "刺客",
+        "Warlock" => "术士",
+        other => other,
+    }
+}
 /// 技能树名的中文（按游戏界面用词）。
 ///
 /// 这些名字**不在字符串表里**——游戏界面上确实显示它们，但字符串存在界面代码

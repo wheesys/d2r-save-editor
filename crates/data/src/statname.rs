@@ -80,11 +80,9 @@ impl StatNamer {
                 match strings.text(key) {
                     Some(text) if !text.is_empty() => {
                         template = Some(text.to_string());
-                        let label = clean_label(text);
-                        if label.is_empty() {
-                            (internal.clone(), false)
-                        } else {
-                            (label, true)
+                        match clean_text_label(text) {
+                            Some(label) => (label, true),
+                            None => (internal.clone(), false),
                         }
                     }
                     _ => (internal.clone(), false),
@@ -186,7 +184,7 @@ impl StatNamer {
 ///
 /// 规则：`%` 后跟着的可选标志/宽度/精度一律丢掉；`%%` 保留成一个 `%`。
 /// 洗完之后如果什么都不剩（例如整条就是 `%d`），返回空串，调用方退回内部名。
-fn clean_label(text: &str) -> String {
+pub fn clean_text_label(text: &str) -> Option<String> {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
@@ -223,9 +221,9 @@ fn clean_label(text: &str) -> String {
     s = s.trim().to_string();
     // 只剩标点符号的不算名字
     if !s.chars().any(|c| c.is_alphanumeric() || !c.is_ascii()) {
-        return String::new();
+        return None;
     }
-    s
+    Some(s)
 }
 
 #[cfg(test)]
@@ -280,12 +278,21 @@ mod tests {
 
     #[test]
     fn label_cleaning() {
-        assert_eq!(clean_label("%+d 力量"), "力量");
-        assert_eq!(clean_label("火焰抗性 %+d%%"), "火焰抗性");
-        assert_eq!(clean_label("耐久度: %i / %i"), "耐久度");
-        assert_eq!(clean_label("%d"), "");
-        assert_eq!(clean_label("  生命  "), "生命");
-        assert_eq!(clean_label("%+d%% 提升攻击速度"), "提升攻击速度");
+        assert_eq!(clean_text_label("%+d 力量").as_deref(), Some("力量"));
+        assert_eq!(
+            clean_text_label("火焰抗性 %+d%%").as_deref(),
+            Some("火焰抗性")
+        );
+        assert_eq!(
+            clean_text_label("耐久度: %i / %i").as_deref(),
+            Some("耐久度")
+        );
+        assert_eq!(clean_text_label("%d"), None);
+        assert_eq!(clean_text_label("  生命  ").as_deref(), Some("生命"));
+        assert_eq!(
+            clean_text_label("%+d%% 提升攻击速度").as_deref(),
+            Some("提升攻击速度")
+        );
     }
 
     #[test]
