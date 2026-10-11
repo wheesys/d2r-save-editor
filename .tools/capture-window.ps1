@@ -45,3 +45,7 @@ $g.CopyFromScreen($r.Left, $r.Top, 0, 0, (New-Object System.Drawing.Size $w, $h)
 $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()
 Write-Output "已保存 $Out"
+
+# 提示：本脚本只截窗口，不负责启动应用。启动 debug 版时请显式隐藏控制台，
+# 否则会多出一个 ConsoleWindowClass 窗口（debug 构建带控制台子系统）：
+#   Start-Process -FilePath .\d2r-desktop.exe -WindowStyle Hidden

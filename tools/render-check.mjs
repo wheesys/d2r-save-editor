@@ -76,7 +76,17 @@ console.log("=== 1. 网格划分（物品该落在哪个容器）===");
   const byKey = Object.fromEntries(grids.map((g) => [g.key, g]));
 
   check("5 个容器", grids.length === 5, `实际 ${grids.length}`);
-  check("装备位是 4×3", byKey.Equip.cols === 4 && byKey.Equip.rows === 3);
+  // 装备位不再用行列网格，而是按游戏装备页的真实布局摆放（值见 EQUIP_SLOT_LAYOUT）
+  check(
+    "装备位用装备页布局（约 215×145）",
+    byKey.Equip.doll !== undefined &&
+      byKey.Equip.doll.width > 200 &&
+      byKey.Equip.doll.width < 230 &&
+      byKey.Equip.doll.height > 135 &&
+      byKey.Equip.doll.height < 155,
+    JSON.stringify(byKey.Equip.doll),
+  );
+  check("装备位没有可拖拽（槽位是固定的）", byKey.Equip.draggable === false);
   check("背包取布局设置 10×4", byKey.Inventory.cols === 10 && byKey.Inventory.rows === 4);
   check("方块取布局设置 3×4", byKey.Cube.cols === 3 && byKey.Cube.rows === 4);
   // 腰带按实际坐标自适应：最大 x=15 的一格药水 → 至少 16 列
@@ -127,9 +137,12 @@ console.log("=== 4. 图标与名字 ===");
   })());
 }
 
-console.log("=== 5. 装备位固定槽 ===");
+console.log("=== 5. 装备位按游戏角色装备页布局 ===");
 {
-  const items = [item({ index: 4, code: "xsk", mode: "Equipped", storePage: "Null", bodyLocation: "Head", quality: "Unique" })];
+  const items = [
+    item({ index: 4, code: "xsk", mode: "Equipped", storePage: "Null", bodyLocation: "Head", quality: "Unique" }),
+    item({ index: 5, code: "rin", mode: "Equipped", storePage: "Null", bodyLocation: "RightRing", quality: "Rare" }),
+  ];
   const html = renderInventory(layout, items, null);
 
   // 按容器分段统计块数。
@@ -143,14 +156,44 @@ console.log("=== 5. 装备位固定槽 ===");
     // 块有两种类名：`class="blk ..."` 与空槽的 `class="blk empty"`
     return (seg.match(/class="blk[ "]/g) ?? []).length;
   };
+
   // 装备位是槽位型：12 个固定槽框，空槽也画
   check("装备位画出 12 个槽（含空槽）", countIn("Equip") === 12, `实际 ${countIn("Equip")}`);
   check("装备物品只画一次（不重复）", (html.match(/data-item="4"/g) ?? []).length === 1);
   // 其它容器只画"有物品"的块（空格子由 CSS 网格背景表现），所以这里没有物品就是 0
-  check("只有头盔时其它容器没有块", ["Inventory", "Cube", "Stash", "Belt"].every((k) => countIn(k) === 0),
-    ["Inventory", "Cube", "Stash", "Belt"].map((k) => `${k}=${countIn(k)}`).join(" "));
-  check("头盔落在槽里（带序号）", html.includes('data-item="4"'));
-  check("空槽显示'空'", html.includes("空"));
+  check(
+    "只有装备时其它容器没有块",
+    ["Inventory", "Cube", "Stash", "Belt"].every((k) => countIn(k) === 0),
+    ["Inventory", "Cube", "Stash", "Belt"].map((k) => `${k}=${countIn(k)}`).join(" "),
+  );
+
+  // 槽位是**按真实布局摆放**的，不再是等间距网格：抽出来逐项验证几何关系
+  const equipSeg = html.slice(html.indexOf('data-grid="Equip"'), html.indexOf('data-grid="Inventory"'));
+  const positions = [
+    ...equipSeg.matchAll(/left:(-?\d+)px;top:(-?\d+)px;width:(\d+)px;height:(\d+)px/g),
+  ].map((m) => ({ left: +m[1], top: +m[2], w: +m[3], h: +m[4] }));
+
+  check("装备页有 12 个定位块", positions.length === 12, `实际 ${positions.length}`);
+  check(
+    "不是等间距网格（不同的 x 至少 5 种）",
+    new Set(positions.map((p) => p.left)).size >= 5,
+    `实际 ${new Set(positions.map((p) => p.left)).size} 种`,
+  );
+
+  const [head, , torso, rArm, lArm] = positions;
+  check("头在躯干上方", head.top < torso.top, `头 top=${head.top}，躯干 top=${torso.top}`);
+  check(
+    "左右臂在躯干两侧且同一高度",
+    rArm.top === lArm.top && rArm.left < torso.left && lArm.left > torso.left,
+    `rArm=${rArm.left} 躯干=${torso.left} lArm=${lArm.left}`,
+  );
+  check("躯干比头大", torso.h > head.h, `躯干 h=${torso.h}，头 h=${head.h}`);
+  check("戒指槽标为估算（虚线）", html.includes("estimated"));
+  check(
+    "装备页画布约 215×145",
+    /width:(21[0-9])px;height:(14[0-9])px/.test(equipSeg),
+    equipSeg.match(/style="width:\d+px;height:\d+px"/)?.[0] ?? "（没找到画布尺寸）",
+  );
 }
 
 console.log("");

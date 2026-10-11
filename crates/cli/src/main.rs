@@ -673,8 +673,14 @@ fn cmd_validate(args: &[String]) -> ExitCode {
         if let Some(json) = arg_of(args, "--layout") {
             match serde_json::from_str::<d2r_core::LayoutSettings>(&json) {
                 Ok(s) => {
-                    ws.set_layout(s);
-                    println!("布局      : 已按 --layout 指定");
+                    // set_layout 会把设置写盘（真实使用下是好事），
+                    // 但 CLI 的 --layout 多是临时校验，写盘失败不该影响校验结果
+                    match ws.set_layout(s) {
+                        Ok(()) => println!("布局      : 已按 --layout 指定（并已记入设置文件）"),
+                        Err(e) => {
+                            println!("布局      : 已按 --layout 指定（设置未写盘：{e}）");
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("--layout 不是合法的布局 JSON：{e}");

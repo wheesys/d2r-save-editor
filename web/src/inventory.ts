@@ -21,8 +21,13 @@ export interface GridSpec {
   match: (item: ItemDto) => boolean;
   /** 是否允许拖拽移动 */
   draggable: boolean;
-  /** 装备位网格：每个格子只有一个槽位，画成固定槽 */
+  /**
+   * 槽位型容器的槽位列表（`slots` 里的 key 与 `EQUIP_SLOT_LAYOUT` 对应）。
+   * 这类容器按槽位画，不做格子越界判断。
+   */
   slots?: string[];
+  /** 槽位型容器的画布尺寸（装备页按真实布局摆放，所以不用行列）。 */
+  doll?: { width: number; height: number };
 }
 
 /** 单格像素尺寸 */
@@ -41,21 +46,77 @@ function iconOf(code: string): string {
   return iconByCode[code] ?? "";
 }
 
-/** 装备位（背包页之外的固定槽位） */
-const EQUIP_SLOTS: { key: string; label: string }[] = [
-  { key: "Head", label: "头" },
-  { key: "Neck", label: "颈" },
-  { key: "Torso", label: "身" },
-  { key: "RightArm", label: "右臂" },
-  { key: "LeftArm", label: "左臂" },
-  { key: "RightRing", label: "右戒" },
-  { key: "LeftRing", label: "左戒" },
-  { key: "Gloves", label: "手" },
-  { key: "Belt", label: "腰" },
-  { key: "Feet", label: "脚" },
-  { key: "RightHand", label: "右手" },
-  { key: "LeftHand", label: "左手" },
+/**
+ * 装备位：按**游戏里角色装备页**的真实布局摆放。
+ *
+ * 坐标来自数据层的布局表（`Inventory.txt`，这里用 Sorceress 行；
+ * 实测各职业的槽位坐标一致）：把原来的 `invLeft/invTop` 当原点、
+ * 各槽的 `xxxLeft/Top/Width/Height` 减掉原点，再乘一个统一缩放。
+ *
+ * 单位：布局表里 `gridBoxWidth = 29`，而背包一格的边长是 inventory 面板宽度
+ * 除以列数（320/10 = 32），两者接近，所以这里按"玩家熟悉的格子大小"把
+ * 装备页整体缩到约 0.62 倍（原版 346×234 → 约 215×145），
+ * 这样 12 个槽加上背包能一屏放下。
+ *
+ * 例外：**戒指两个槽在布局表里没有坐标**（游戏把它们写在界面代码里），
+ * 位置是按左右对称估的，标了 `estimated`。
+ */
+const EQUIP_SLOT_LAYOUT: {
+  key: string;
+  label: string;
+  /** 相对装备页原点的像素（未缩放）。 */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** 位置是不是估的（布局表里没有）。 */
+  estimated?: boolean;
+}[] = [
+  // 头 455,8 / 54×51
+  { key: "Head", label: "头", x: 455 - 320, y: 8, w: 54, h: 51 },
+  // 颈 529,35 / 23×24
+  { key: "Neck", label: "颈", x: 529 - 320, y: 35, w: 23, h: 24 },
+  // 身 453,77 / 56×82
+  { key: "Torso", label: "身", x: 453 - 320, y: 77, w: 56, h: 82 },
+  // 右臂 340,47 / 55×112
+  { key: "RightArm", label: "右臂", x: 340 - 320, y: 47, w: 55, h: 112 },
+  // 左臂 571,47 / 55×112
+  { key: "LeftArm", label: "左臂", x: 571 - 320, y: 47, w: 55, h: 112 },
+  // 手（手套）341,181 / 54×53
+  { key: "Gloves", label: "手套", x: 341 - 320, y: 181, w: 54, h: 53 },
+  // 脚 572,182 / 54×52
+  { key: "Feet", label: "脚", x: 572 - 320, y: 182, w: 54, h: 52 },
+  // 腰 456,179 / 52×25
+  { key: "Belt", label: "腰", x: 456 - 320, y: 179, w: 52, h: 25 },
+  // 右手（武器）415,180 / 23×24
+  { key: "RightHand", label: "右手", x: 415 - 320, y: 180, w: 23, h: 24 },
+  // 左手（副手）529,180 / 23×24
+  { key: "LeftHand", label: "左手", x: 529 - 320, y: 180, w: 23, h: 24 },
+  // 戒指：布局表里没有坐标，按与双手对称的位置估
+  { key: "RightRing", label: "右戒", x: 390 - 320, y: 145, w: 23, h: 24, estimated: true },
+  { key: "LeftRing", label: "左戒", x: 555 - 320, y: 145, w: 23, h: 24, estimated: true },
 ];
+
+/**
+ * 装备页整体缩放。
+ *
+ * 布局表里原版装备页是 346×234（相对坐标），这里按 0.62 缩到约 215×145：
+ * 这样它和背包（默认 10 格 = 340 宽）在窗口里各自占一行的位置，
+ * 背包自然落到下面一行，不再是"挤在同一排、后半截看不到"。
+ */
+const EQUIP_SCALE = 0.62;
+
+/** 缩放后的装备页尺寸。 */
+const EQUIP_DOLL_SIZE = {
+  width: Math.round(346 * EQUIP_SCALE),
+  height: Math.round(234 * EQUIP_SCALE),
+};
+
+/** 装备位（背包页之外的固定槽位） */
+const EQUIP_SLOTS: { key: string; label: string }[] = EQUIP_SLOT_LAYOUT.map((s) => ({
+  key: s.key,
+  label: s.label,
+}));
 
 /** 按用户确认的布局生成各容器网格 */
 export function buildGrids(layout: LayoutSettings, items: ItemDto[] = []): GridSpec[] {
@@ -78,10 +139,11 @@ export function buildGrids(layout: LayoutSettings, items: ItemDto[] = []): GridS
     {
       key: "Equip",
       title: "装备位",
-      cols: 4,
-      rows: 3,
+      cols: 1,
+      rows: 1,
       draggable: false,
       slots: EQUIP_SLOTS.map((s) => s.key),
+      doll: EQUIP_DOLL_SIZE,
       match: isEquipped,
     },
     {
@@ -168,7 +230,7 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
         })
         .join("");
 
-  // 装备位：固定槽位框
+  // 装备位：按真实布局摆放的槽位框（坐标来自 EQUIP_SLOT_LAYOUT）
   let slotBoxes = "";
   if (spec.slots) {
     const bySlot = new Map<number, ItemDto>();
@@ -176,27 +238,36 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
       const idx = equipSlotIndex(it);
       if (idx >= 0 && !bySlot.has(idx)) bySlot.set(idx, it);
     }
-    slotBoxes = spec.slots
-      .map((slotKey, i) => {
-        const it = bySlot.get(i);
-        const label = it ? itemLabel(it) : (EQUIP_SLOTS[i]?.label ?? slotKey);
-        const sel = it && selected === it.index ? " selected" : "";
-        const cls = it ? `blk q-${it.quality.toLowerCase()}${sel}` : "blk empty";
-        const data = it ? ` data-item="${it.index}"` : "";
-        const title = it ? escapeAttr(tooltip(it)) : `${EQUIP_SLOTS[i]?.label ?? slotKey}（空）`;
-        const sock = it && it.socketCount > 0 ? `<span class="blk-sock">${it.socketedCount}/${it.socketCount}</span>` : "";
-        const icon = it ? iconOf(it.code) : "";
-        const art = icon
-          ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it ? it.code : "")}" draggable="false" />`
-          : `<span class="blk-code">${escapeHtml(it ? it.code : (EQUIP_SLOTS[i]?.label ?? ""))}</span>`;
-        return `<div class="${cls}" style="left:${(i % spec.cols) * CELL}px;top:${Math.floor(i / spec.cols) * CELL}px;width:${CELL - 2}px;height:${CELL - 2}px"
-          ${data} title="${title}">
-          ${art}
-          <span class="blk-name">${escapeHtml(it ? label : "空")}</span>
-          ${sock}
-        </div>`;
-      })
-      .join("");
+    slotBoxes = EQUIP_SLOT_LAYOUT.map((slot, i) => {
+      const it = bySlot.get(i);
+      const label = it ? itemLabel(it) : slot.label;
+      const sel = it && selected === it.index ? " selected" : "";
+      const cls = it ? `blk q-${it.quality.toLowerCase()}${sel}` : "blk empty";
+      const data = it ? ` data-item="${it.index}"` : "";
+      const note = slot.estimated ? "（位置为估算）" : "";
+      const title = it
+        ? escapeAttr(tooltip(it))
+        : `${slot.label}（空）${note}`;
+      const sock =
+        it && it.socketCount > 0
+          ? `<span class="blk-sock">${it.socketedCount}/${it.socketCount}</span>`
+          : "";
+      const icon = it ? iconOf(it.code) : "";
+      const art = icon
+        ? `<img class="blk-icon" src="${icon}" alt="${escapeAttr(it ? it.code : "")}" draggable="false" />`
+        : `<span class="blk-code">${escapeHtml(it ? it.code : slot.label)}</span>`;
+      // 槽位按布局表的比例缩放定位；小槽（戒指/双手）不放名称，避免文字溢出
+      const w = Math.round(slot.w * EQUIP_SCALE);
+      const h = Math.round(slot.h * EQUIP_SCALE);
+      const showName = w >= 40 && !it;
+      return `<div class="${cls}${slot.estimated ? " estimated" : ""}"
+        style="left:${Math.round(slot.x * EQUIP_SCALE)}px;top:${Math.round(slot.y * EQUIP_SCALE)}px;width:${w}px;height:${h}px"
+        ${data} title="${title}">
+        ${art}
+        ${showName ? `<span class="blk-name">${escapeHtml(label)}</span>` : ""}
+        ${sock}
+      </div>`;
+    }).join("");
   }
 
   const oob = outOfBounds.length
@@ -210,12 +281,18 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
       `</div>`
     : "";
 
+  // 画布尺寸：槽位型容器用装备页的真实尺寸，网格型用 格子数×格宽
+  const canvas = spec.doll
+    ? { width: spec.doll.width, height: spec.doll.height }
+    : { width: spec.cols * CELL, height: spec.rows * CELL };
+  const sizeNote = spec.doll ? "游戏角色装备页布局" : `${spec.cols}×${spec.rows}`;
+
   return `<div class="grid-wrap" data-grid="${spec.key}">
     <div class="grid-head">${spec.title}
-      <span class="muted">${mine.length} 件${spec.draggable ? "｜可拖拽移动" : ""}｜${spec.cols}×${spec.rows}</span>
+      <span class="muted">${mine.length} 件${spec.draggable ? "｜可拖拽移动" : ""}｜${sizeNote}</span>
     </div>
-    <div class="grid" data-cols="${spec.cols}" data-rows="${spec.rows}"
-      style="width:${spec.cols * CELL}px;height:${spec.rows * CELL}px">
+    <div class="grid${spec.doll ? " doll" : ""}" data-cols="${spec.cols}" data-rows="${spec.rows}"
+      style="width:${canvas.width}px;height:${canvas.height}px">
       ${slotBoxes}
       ${blocks}
     </div>

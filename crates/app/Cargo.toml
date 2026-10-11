@@ -25,3 +25,7 @@ flate2 = "1"
 [build-dependencies]
 # 构建期压缩数据包（文本数据压到约 18%）
 flate2 = "1"
+
+[dev-dependencies]
+# 集成测试里直接构造布局设置
+d2r-core = { workspace = true }

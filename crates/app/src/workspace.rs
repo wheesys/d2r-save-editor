@@ -69,6 +69,10 @@ pub struct Workspace {
     waypoint_namer: d2r_data::WaypointNamer,
     /// 任务名解析器（幕/槽 → 任务中文名）。
     quest_namer: d2r_data::QuestNamer,
+    /// 用户设置的持久化（整机一份）。
+    config: crate::config::ConfigStore,
+    /// 上一次存设置的提示（存成功/失败各一句）。
+    config_note: Option<String>,
     /// 当前编辑会话。
     session: Option<EditSession>,
     /// 当前已打开的存档信息（未打开时为 `None`）。
@@ -170,6 +174,12 @@ impl Workspace {
         };
         let quest_namer = d2r_data::QuestNamer::new(&strings);
 
+        // 读取用户设置：布局是 mod 级、整机一份。读出来直接当默认值，
+        // 这样"设置过一次"之后每次打开任何角色都不用再填。
+        // 读失败（没有文件/内容坏了）就退回默认值，不让配置问题挡住主流程。
+        let config = crate::config::ConfigStore::new();
+        let layout = config.load().map(|s| s.layout).unwrap_or_default();
+
         Self {
             game_dir,
             mod_tables_dir: mod_tables,
@@ -179,9 +189,11 @@ impl Workspace {
             stat_namer,
             waypoint_namer,
             quest_namer,
+            config,
+            config_note: None,
             strings,
             lang: "zhCN".to_string(),
-            layout: LayoutSettings::default(),
+            layout,
             session: None,
             current: None,
         }
@@ -384,10 +396,42 @@ impl Workspace {
         &self.layout
     }
 
-    /// 用户确认/修改布局设置。
-    pub fn set_layout(&mut self, mut s: LayoutSettings) {
+    /// 用户确认/修改布局设置，并**存到磁盘**。
+    ///
+    /// 布局是 mod 级的东西，同机所有角色共用一套，所以整机存一份：
+    /// 下次打开任何角色都直接带上，不用再填一次。
+    pub fn set_layout(&mut self, mut s: LayoutSettings) -> Result<(), AppError> {
         s.confirmed_by_user = true;
         self.layout = s;
+        self.save_settings();
+        Ok(())
+    }
+
+    /// 配置文件路径（界面上显示出来，方便用户知道设置存哪了）。
+    pub fn config_path(&self) -> String {
+        self.config.path().display().to_string()
+    }
+
+    /// 把当前设置写盘。
+    ///
+    /// **不因为写失败而让操作失败**：设置已经在内存里生效了，
+    /// 存不下来最多是"下次要重填"，不该把用户卡住。所以只记录一条提示。
+    fn save_settings(&mut self) {
+        let settings = crate::config::Settings {
+            layout: self.layout.clone(),
+            layout_confirmed: self.layout.confirmed_by_user,
+        };
+        match self.config.save(&settings) {
+            Ok(p) => self.config_note = Some(format!("设置已保存到 {}", p.display())),
+            Err(e) => self.config_note = Some(format!("设置没能存盘（{e}），下次启动需要重新确认")),
+        }
+    }
+
+    /// 上一次存设置的提示（没存过时为 `None`）。
+    ///
+    /// 方法名不叫 `config_note`——那会和同名字段冲突。
+    pub fn settings_note(&self) -> Option<&str> {
+        self.config_note.as_deref()
     }
 
     /// 从存档推断布局（读不出来的项列在 `unknowns` 里，交给界面提示用户）。

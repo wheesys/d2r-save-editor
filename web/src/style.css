@@ -150,7 +150,9 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 #item-stats td { white-space: nowrap; }
 #item-detail-section h3 { margin: 14px 0 6px; font-size: 14px; }
 /* 容器网格视图（背包/方块/箱子/腰带/装备位） */
-.inventory { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-start; }
+/* 容器视图：每个容器占一行，装备页在上、背包在下。
+   以前是 flex-wrap 平铺，装备位与背包挤在同一排，后半截看不到。 */
+.inventory { display: flex; flex-direction: column; gap: 18px; align-items: flex-start; }
 .grid-wrap { display: flex; flex-direction: column; gap: 6px; }
 .grid-head { font-size: 13px; color: var(--fg); display: flex; gap: 8px; align-items: baseline; }
 .grid {
@@ -207,6 +209,12 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
   padding: 0 18px;
   border-bottom: 1px solid var(--line);
   background: var(--panel);
+  /* 吸顶：跟着 header 一起停住，滚动内容时页签始终可见。
+     `top` 由脚本实测 header 高度后写入 --header-h（数据集那行会换行，高度不固定，
+     写死数值会在窄窗口下露缝或被挡住）。 */
+  position: sticky;
+  top: var(--header-h, 96px);
+  z-index: 4;
 }
 .tab {
   background: transparent;
@@ -313,3 +321,30 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 }
 .merc-body { display: flex; flex-direction: column; line-height: 1.25; font-size: 13px; }
 .merc-edit { margin-left: auto; font-size: 11px; color: #9a9a9a; }
+/* 未打开存档时的提示 */
+.empty-hint {
+  color: #9a9a9a;
+  font-size: 14px;
+  line-height: 1.7;
+  padding: 8px 2px;
+}
+.empty-hint code {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+/* 装备位按游戏角色装备页布局：不是均匀网格，所以不画格子底纹 */
+.grid.doll {
+  background: var(--panel-2);
+  border-style: solid;
+}
+.grid.doll .blk {
+  /* 槽位比格子小，文字只在不放图标时显示 */
+  padding: 1px 2px;
+  justify-content: center;
+}
+.grid.doll .blk .blk-code { font-size: 10px; text-align: center; }
+.grid.doll .blk .blk-name { font-size: 10px; text-align: center; }
+/* 位置是估算的槽位（戒指）：用虚线边框提示一下 */
+.grid.doll .blk.estimated { border-style: dashed; }

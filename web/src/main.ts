@@ -787,14 +787,22 @@ function activateTab(key: string) {
   // 切到物品栏时容器网格可能因为之前尺寸未知而没渲染，这里补一次
   if (key === "items") renderContainerView();
 }
+/**
+ * 启动时若后端已经打开了存档（`D2R_OPEN_SAVE` 或命令行传入），直接把它显示出来。
+ *
+ * 注意：共享箱（.d2i）**也要**走 `loadAll()`——否则物品页签会是空的
+ * （曾经就是这个 bug：箱子打开了却什么都没渲染）。
+ */
 async function bootIfAlreadyOpen() {
   try {
     const info = await call<SaveInfo | null>("current_save");
     if (!info) return;
     renderSaveInfo(info);
     if (info.kind === "stash") {
-      $("#items-section").classList.add("hidden");
-      return;
+      // 共享箱没有角色/技能/任务/佣兵，这几块藏掉
+      for (const sel of ["#char-section", "#skills-section", "#quests-section", "#merc-section"]) {
+        $(sel).classList.add("hidden");
+      }
     }
     await loadAll();
   } catch {
@@ -825,6 +833,47 @@ async function loadIcons() {
     /* 老后端没有这个命令 */
   }
 }
+/**
+ * 还没打开存档时，给每个页签放一句提示。
+ *
+ * 为什么需要它：各区块默认是隐藏的（`hidden`），没打开存档时点页签就是一片空白，
+ * 看起来像"坏了"。这里把"该做什么"直接写在页签里，不用猜。
+ */
+function renderEmptyState() {
+  const hint = (text: string) =>
+    `<div class="card"><div class="empty-hint">${text}<br/><br/>` +
+    `点左上角 <b>「打开存档…」</b> 选择角色存档（<code>.d2s</code>）或共享储物箱（<code>.d2i</code>）。</div></div>`;
+
+  // 这些区块在有存档时会被各自的渲染函数显示出来，所以只要先把提示放进去
+  const placeholders: [string, string][] = [
+    ["#char-section", "这里显示角色属性、金币与经验。"],
+    ["#skills-section", "这里显示该角色的技能加点。"],
+    ["#waypoints-section", "这里显示三个难度的小站开通情况。"],
+    ["#quests-section", "这里显示各幕任务进度（未开始 / 进行中 / 已完成）。"],
+    ["#inventory-section", "这里按容器网格显示物品栏（装备位 / 背包 / 方块 / 箱子 / 腰带）。"],
+    ["#items-section", "这里显示物品清单。"],
+    ["#merc-section", "这里显示佣兵装备。"],
+    ["#layout-section", "这里设置容器尺寸（mod 改动过、存档里读不出来的项）。"],
+  ];
+  for (const [sel, text] of placeholders) {
+    const el = $(sel);
+    el.innerHTML = hint(text);
+    el.classList.remove("hidden");
+  }
+}
+
+/**
+ * 把 header 的实际高度写进 CSS 变量 `--header-h`，供吸顶的页签条定位。
+ *
+ * 为什么用脚本量：header 里有工具栏与数据集那行，后者会在窄窗口换行，
+ * 高度不是固定值；写死数值会导致页签条露缝或被遮住一小条。
+ */
+function syncHeaderHeight() {
+  const header = document.querySelector("header");
+  if (!header) return;
+  document.documentElement.style.setProperty("--header-h", `${header.offsetHeight}px`);
+}
+
 function bind() {
   // 明细面板：应用该物品的修改 / 添加属性
   $("#btn-apply-detail").addEventListener("click", applyDetailEdits);
@@ -912,6 +961,14 @@ function bind() {
     const n = Number(ev.key);
     if (Number.isInteger(n) && n >= 1 && n <= order.length) activateTab(order[n - 1]);
   });
+
+  // 还没打开存档前，每个页签先显示"该做什么"，避免点进去看到一片空白
+  renderEmptyState();
+
+  // 页签条吸顶：把 header 的实际高度写进 CSS 变量。
+  // 数据集那行文字会换行，header 高度随窗口宽度变，所以不能写死数值。
+  syncHeaderHeight();
+  window.addEventListener("resize", syncHeaderHeight);
 
   void bootIfAlreadyOpen();
 
