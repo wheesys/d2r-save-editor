@@ -89,7 +89,7 @@ if (-not $game) {
 }
 Write-Host "游戏目录 : $game"
 if (-not (Test-Path (Join-Path $game 'Data\data'))) {
-    Write-Host '[!] 该目录下没有 Data\data（游戏数据存储），确认这是 D2R 安装目录。' -ForegroundColor Yellow
+    Write-Host '[!] 该目录下没有 Data\data，确认这是 D2R 安装目录。' -ForegroundColor Yellow
 }
 
 $cv = Find-Viewer -Explicit $Viewer

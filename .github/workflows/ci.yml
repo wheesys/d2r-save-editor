@@ -8,7 +8,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # CI 上没有、也不应该有游戏数据。允许"无数据构建"，只验证可编译。
+  # 资源包只在本机准备。CI 上允许"无资源包构建"，只验证可编译。
   D2R_ALLOW_NO_BUNDLE: "1"
 
 jobs:
