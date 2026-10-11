@@ -1328,14 +1328,15 @@ fn cmd_item(args: &[String]) -> ExitCode {
         // 不说明的话 61 会被当成总值。
         let mut notes: Vec<String> = Vec::new();
         if s.per_level {
-            // "每级"的量用**显示值**（已按存储精度换算），游戏里看到的就是这个数；
-            // 合计由后端算好（值 × 物品等级），同样换算过。
+            // 官方公式：值 / 2^op_param × 角色等级（数据里 op base = level）。
+            // 所以这里给的是**按角色等级算出的实际加成**，不是"每级 X"。
             notes.push(match s.effective_value {
-                Some(total) => format!(
-                    "每级 +{}（等级 {} → 合计 {}）",
-                    s.display_value, detail.item.level, total
+                Some(total) if total != 0 => format!(
+                    "按角色等级加成（系数 {}，当前实际 +{}）",
+                    s.display_value, total
                 ),
-                None => format!("每级 +{}", s.display_value),
+                Some(_) => "按角色等级加成，当前角色等级下为 0".to_string(),
+                None => format!("按角色等级加成（系数 {}）", s.display_value),
             });
         }
         if !s.user_visible {

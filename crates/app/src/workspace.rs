@@ -799,6 +799,8 @@ impl Workspace {
         index: usize,
     ) -> Result<ItemDetailDto, AppError> {
         let detail = { self.session()?.item_detail_on(target, index)? };
+        // 按等级加成的属性依据的是**角色等级**（ItemStatCost 的 op base = level）
+        let character_level = i64::from(self.session()?.file.save.character.level);
         let size_map = crate::bundle::item_size_map();
         let mut namer = ItemNamer::new(&self.strings, &mut self.tables, self.lang.clone());
         let n = namer.resolve(&detail.code, &detail.quality, detail.quality_index);
@@ -815,17 +817,21 @@ impl Workspace {
                 // 逐条属性各有自己的有效范围（ItemStatCost 的位宽/偏移/移位），
                 // 界面要把它显示出来，用户才知道能填多少。
                 let limit = self.stat_limits.get(*id);
-                // 按等级加成的属性（*perlevel）存的是**每级的值**，不是总值；
-                // 界面要标明，并给出"等级 N → 合计 M"，否则会被当成总值。
+                // 按等级加成的属性（*perlevel）存的是**系数**，不是直接加成：
+                // 游戏按 `值 / 2^op_param × 角色等级` 算（见 StatLimit::per_level_total）。
                 let per_level = limit.map(|l| l.per_level).unwrap_or(false);
                 // 换算成**游戏里显示的值**（内部做掉，用户不需要知道）：
-                //   生命/法力 按 1/256 精度存；攻速/跑速这类带 SaveAdd 偏移。
+                // 生命/法力 按 1/256 精度存，所以要除以 256。
                 let display = limit.map(|l| l.to_display(*value)).unwrap_or(*value);
-                // 范围也要用显示值，否则会显示成 -27–107 这种内部数
+                // 范围也要用显示值，否则会显示成内部数
                 let (min_value, max_value) = match limit {
                     Some(l) => (Some(l.to_display(l.min())), Some(l.to_display(l.max()))),
                     None => (None, None),
                 };
+                // 实际加成依据的是**角色等级**（数据里 op base = level），不是物品等级
+                let effective_value = limit
+                    .filter(|l| l.per_level)
+                    .map(|l| l.per_level_total(display, character_level));
                 ItemStatDto {
                     id: *id,
                     layer: *layer,
@@ -839,8 +845,7 @@ impl Workspace {
                     max_value,
                     range_text: limit.map(|l| l.range_text()),
                     per_level,
-                    // 合计与显示值同单位：显示值 × 物品等级
-                    effective_value: per_level.then(|| display * i64::from(detail.level)),
+                    effective_value,
                     display_value: display,
                     display_step: limit.map(|l| l.step()).unwrap_or(1),
                     param_label: self.param_label(*id, *value, *layer),

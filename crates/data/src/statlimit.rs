@@ -35,10 +35,17 @@ pub struct StatLimit {
     pub has_encoding: bool,
     /// 是不是"按等级加成"的属性（`ItemStatCost` 的 `Stat` 以 `perlevel` 结尾）。
     ///
-    /// 这类属性存的是**每级的值**，游戏里显示成"每级 +X"。
-    /// 只显示一个裸数字会让人以为是总值（用户实际提过这个问题）。
-    /// 数据表里它们还有个统一标记：`descfunc = 19`（按等级增强的显示函数）。
+    /// 这类属性的**数值部分是系数**，不是直接加成：游戏按
+    /// `值 / 2^op_param × 角色等级` 算出实际加成。
+    /// 只显示一个裸数字会让人误以为是总值（用户实际提过这个问题）。
     pub per_level: bool,
+    /// 按等级加成时的除法因子指数（`ItemStatCost` 的 `op param`）。
+    ///
+    /// 官方公式（见 `itemstatcost.txt` 的 `op` / `op param` / `op base`）：
+    /// `实际加成 = 值 / 2^op_param × op_base`，`op base` 是 `level`（角色等级）。
+    /// "`2^op param` = 每级 1 点需要多少值"。
+    /// 实测本表里 38 个 `*perlevel` 属性中，除命中类是 1 之外**全是 3**（即除以 8）。
+    pub op_param: u8,
     /// 移位量（`ValShift`）。
     ///
     /// 存档里的写法是 `写成 << ValShift`，所以**界面上的值必须是
@@ -129,6 +136,19 @@ impl StatLimit {
         format!("{}–{}", self.display_min(), self.display_max())
     }
 
+    /// 按等级加成属性的**实际加成**（游戏里显示的那个数）。
+    ///
+    /// 官方公式（`ItemStatCost.txt` 的 `op` / `op param` / `op base`）：
+    /// `实际加成 = 值 × 角色等级 / 2^op_param`，本表 `op base` 都是 `level`
+    /// （**角色等级**，不是物品等级）。
+    ///
+    /// 顺序很关键：**先乘后除**。先整除（`63/8=7`）再乘会得到 357，
+    /// 而正确结果是 `63 × 52 / 8 = 409.5 → 409`，与游戏里"生命加了 409"一致。
+    pub fn per_level_total(&self, value: i64, character_level: i64) -> i64 {
+        let divisor = 1i64 << self.op_param.min(62);
+        value.saturating_mul(character_level) / divisor
+    }
+
     /// 把**存档里的值**换算成**游戏里显示的值**。
     ///
     /// 只需要处理移位（`ValShift`）：带移位的属性存的是放大过的量，
@@ -188,6 +208,8 @@ impl StatLimits {
                 .cell(r, "Stat")
                 .map(|n| n.to_ascii_lowercase().ends_with("perlevel"))
                 .unwrap_or(false);
+            // 按等级加成的除法因子：官方公式是 值 / 2^op_param × 角色等级
+            let op_param = table.int(r, "op param").unwrap_or(0).clamp(0, 62) as u8;
             by_id.insert(
                 id as u16,
                 StatLimit {
@@ -197,6 +219,7 @@ impl StatLimits {
                     has_param_bits: param,
                     has_encoding: encoding,
                     per_level,
+                    op_param,
                     val_shift,
                 },
             );
@@ -337,6 +360,7 @@ mod tests {
             has_param_bits: false,
             has_encoding: false,
             per_level: false,
+            op_param: 0,
             val_shift,
         }
     }
@@ -475,5 +499,37 @@ mod tests {
         );
         assert!(limits.check(83, 9).is_err(), "值本身超出 3 位");
         assert!(limits.advise(83, 3).unwrap().contains("参数位"));
+    }
+
+    /// 按等级加成属性的实际加成：`值 × 角色等级 / 2^op_param`。
+    ///
+    /// 官方来源：`ItemStatCost.txt` 的 `op` / `op param` / `op base`，
+    /// 公式见 Phrozen Keep 的说明（`2^op param` = 每级 1 点需要多少值，
+    /// `op base` 在这里是角色等级）。
+    ///
+    /// 这条测试同时钉住**运算顺序**：必须"先乘后除"。
+    /// 我先写成先整除再乘，52 级时得出 357 而不是 409（用户实测是 409）。
+    #[test]
+    fn per_level_uses_character_level() {
+        let mut hp = limit(216, 6, 0, 8); // item_hp_perlevel
+        hp.per_level = true;
+        hp.op_param = 3; // 除以 8
+
+        // 用户实测：52 级角色，这件物品的生命加成是 409
+        assert_eq!(hp.per_level_total(63, 52), 409, "63×52/8 = 409.5 → 409");
+        assert_eq!(
+            hp.per_level_total(63, 52),
+            63 * 52 / 8,
+            "必须先乘后除；先整除会得到 357"
+        );
+
+        // 命中类属性是 op param = 1（除以 2）
+        let mut ar = limit(224, 6, 0, 0); // item_tohit_perlevel
+        ar.per_level = true;
+        ar.op_param = 1;
+        assert_eq!(ar.per_level_total(10, 50), 250, "10×50/2");
+
+        // 等级为 0 时实际加成为 0
+        assert_eq!(hp.per_level_total(63, 0), 0);
     }
 }
