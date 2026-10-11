@@ -143,6 +143,7 @@ fn merc_stat_edit_and_replay_are_target_aware() {
                 index: 0,
                 stat,
                 value: 7,
+                layer: None,
             },
         )
         .expect("改佣兵属性");

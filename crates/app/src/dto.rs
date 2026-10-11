@@ -267,6 +267,22 @@ pub struct ItemStatDto {
     /// 否则同一件物品上会出现两行看起来一模一样的属性
     /// （层不同、数值相同），用户无法区分。
     pub has_layer: bool,
+    /// 层（参数）的**可选值**：层号 + 该层含义的名字。
+    ///
+    /// 界面把它做成下拉框，用户就能像游戏里那样"改成法师的技能等级"
+    /// 而不是去猜层号。空表示这个属性的层没有已知的可选集合，
+    /// 此时界面只显示层号（不猜）。
+    pub param_options: Vec<ParamOptionDto>,
+}
+
+/// 参数位（层）的一个可选值。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParamOptionDto {
+    /// 层号（写回存档的值）。
+    pub layer: i32,
+    /// 该层的含义（如"法师"、"狂热"）。
+    pub label: String,
 }
 
 /// 一件物品的完整明细（界面的物品编辑面板用）。

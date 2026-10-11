@@ -112,7 +112,7 @@ export interface AppError {
 // 修改指令（与 d2r_core::Edit 的 JSON 形态一致：tag = "kind"）
 export type Edit =
   | { kind: "setLevel"; level: number }
-  | { kind: "setStat"; stat: number; value: number }
+  | { kind: "setStat"; stat: number; value: number; layer?: number }
   | { kind: "setSkill"; index: number; level: number }
   | { kind: "unlockWaypoints"; difficulty: number }
   | { kind: "setWaypoint"; difficulty: number; index: number; active: boolean };
@@ -123,7 +123,7 @@ export type ItemEdit =
   | { kind: "setDurability"; index: number; value: number }
   | { kind: "setDefense"; index: number; value: number }
   | { kind: "setSockets"; index: number; count: number }
-  | { kind: "setStat"; index: number; stat: number; value: number }
+  | { kind: "setStat"; index: number; stat: number; value: number; layer?: number }
   | { kind: "removeStat"; index: number; stat: number }
   | { kind: "moveTo"; index: number; col: number; row: number }
   | { kind: "remove"; index: number };
@@ -198,6 +198,8 @@ export interface ItemStatDto {
   paramLabel: string | null;
   /** 是否带参数位（带的话有"层"这个第二变量，必须一起展示） */
   hasLayer: boolean;
+  /** 层（参数）的可选值；界面做成下拉框。空表示没有已知的可选集合 */
+  paramOptions: { layer: number; label: string }[];
 }
 
 export interface ItemDetailDto {

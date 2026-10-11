@@ -461,9 +461,13 @@ function statValueText(s: ItemStatDto): string {
   return "";
 }
 
+/** 当前弹窗里展示的属性（收集改动时用来判断"有没有真的变"）。 */
+let detailStats: ItemStatDto[] = [];
+
 /** 渲染明细面板 */
 function renderItemDetail(detail: ItemDetailDto) {
   const it = detail.item;
+  detailStats = detail.stats;
   $("#detail-title").textContent = `${it.name}（${it.code} #${it.index}）`;
   $("#detail-summary").textContent =
     `品质 ${it.quality}｜等级 ${it.level}｜位置 ${shortPage(it.storePage)}` +
@@ -522,22 +526,50 @@ function renderItemDetail(detail: ItemDetailDto) {
         s.minValue !== null && s.maxValue !== null
           ? `范围 ${s.minValue} ~ ${s.maxValue}`
           : "";
+      // 层的单元格：有已知可选值时渲染成 `<select>`（用户直接选"法师"），
+      // 否则退化成只读文本显示层号。
+      const layerCell =
+        s.paramOptions.length > 0
+          ? `<select class="cell-select" data-stat-layer-sel="${s.id}"
+               data-stat-layer-cur="${s.layer}">${s.paramOptions
+               .map(
+                 (o) =>
+                   `<option value="${o.layer}"${o.layer === s.layer ? " selected" : ""}>${escapeHtml(o.label)}</option>`,
+               )
+               .join("")}</select>`
+          : s.hasLayer
+            ? `<span class="muted">${s.layer}</span>`
+            : "";
       return `<tr>
         <td>${s.id}</td>
         <td${nameCls}>${s.name}${s.userVisible ? "" : " <span class='muted'>(内部字段)</span>"}</td>
         <td class="muted">${s.internal}</td>
-        <td><input type="text" inputmode="numeric" class="cell-input" value="${escapeAttr(statValueText(s))}"
+        <td><input type="text" inputmode="numeric" class="cell-input"
           data-stat-id="${s.id}" data-stat-layer="${s.layer}"
           data-min="${s.minValue ?? ""}" data-max="${s.maxValue ?? ""}"
           data-step="${s.displayStep}" title="${escapeAttr(hint)}" /></td>
+        <td>${layerCell}</td>
         <td>${note}</td>
         <td><button class="mini danger" data-del-stat="${s.id}" data-del-layer="${s.layer}">删除</button></td>
       </tr>`;
     })
     .join("");
   $("#item-stats").innerHTML =
-    `<thead><tr><th>ID</th><th>属性</th><th>内部名</th><th>值</th><th>说明</th><th></th></tr></thead>` +
+    `<thead><tr><th>ID</th><th>属性</th><th>内部名</th><th>值</th><th>层</th><th>说明</th><th></th></tr></thead>` +
     `<tbody>${rows}</tbody>`;
+
+  // **值的写入放到 innerHTML 之后显式赋值**，不走 HTML 属性。
+  //
+  // 之前是 `value="${...}"` 拼进字符串，出现过"整列空白"：
+  // 属性字符串里只要有一个字符让浏览器解析异常，值就丢了，
+  // 而且编译器与模板测试都发现不了（模板产出是对的）。
+  // 显式赋值只经过 DOM 属性一条路径，渲染一定与数据一致。
+  document.querySelectorAll<HTMLInputElement>("input[data-stat-id]").forEach((el) => {
+    const stat = detail.stats.find(
+      (s) => s.id === Number(el.dataset.statId) && s.layer === Number(el.dataset.statLayer),
+    );
+    el.value = stat ? statValueText(stat) : "";
+  });
 
   // 删除属性按钮
   document.querySelectorAll<HTMLButtonElement>("button[data-del-stat]").forEach((btn) => {
@@ -675,17 +707,45 @@ function collectDetailEdits(): ItemEdit[] {
   const def = num("#d-defense");
   if (def !== null && def !== it.defense) edits.push({ kind: "setDefense", index, value: def });
 
-  // 属性值
+  // 属性值：**只发送真正改动的**。
+  //
+  // 以前无条件把所有输入框都发出去，而后端按 `stat + layer` 定位：
+  // 带参数位的属性（层非 0，如 item_aura 层 123）在旧逻辑里永远匹配不上，
+  // 于是每次"应用修改"都**新增一条**，存档越改越乱。
+  // 现在两边都按 `stat + layer` 精确处理，并且不再发没改的。
   collectProblems.length = 0;
+  const originalOf = (stat: number, layer: number) =>
+    detailStats.find((s) => s.id === stat && s.layer === layer);
   document.querySelectorAll<HTMLInputElement>("input[data-stat-id]").forEach((el) => {
     const stat = Number(el.dataset.statId);
+    const layer = Number(el.dataset.statLayer);
     const value = Number(el.value);
-    // 前端先按输入框上的 min/max/step 拦一道，给出**具体到哪条属性**的提示，
+    const original = originalOf(stat, layer);
+    // 前端先按输入框上的范围/步长拦一道，给出**具体到哪条属性**的提示，
     // 而不是等后端拒绝后只看到一句"ID 7 的值 100 存不进去"。
     // 后端仍会再校验一次（前端只是让提示更好懂，不替代后端校验）。
     const problem = statValueProblem(stat, value, el);
     if (problem) collectProblems.push(problem);
-    edits.push({ kind: "setStat", index, stat, value });
+    // 值没变就不发（避免把 layer 非 0 的属性重复写一遍）
+    if (original && original.value === value) return;
+    edits.push({ kind: "setStat", index, stat, value, layer });
+  });
+
+  // 层（参数）改动：把当前选择与原始层比较，不同才发
+  document.querySelectorAll<HTMLSelectElement>("select[data-stat-layer-sel]").forEach((el) => {
+    const stat = Number(el.dataset.statLayerSel);
+    const current = Number(el.dataset.statLayerCur);
+    const next = Number(el.value);
+    if (Number.isNaN(next) || next === current) return;
+    const original = originalOf(stat, current);
+    // 层的改动本质是"把这条属性挪到另一个层"，值保持不变
+    edits.push({
+      kind: "setStat",
+      index,
+      stat,
+      value: original ? original.value : 0,
+      layer: next,
+    });
   });
   return edits;
 }

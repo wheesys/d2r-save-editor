@@ -467,3 +467,15 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 }
 /* 拖拽中禁止选中文本，否则会拉出一片蓝 */
 .grid .blk { user-select: none; }
+
+/* 层（参数）下拉框：和值输入框同一视觉规格 */
+.cell-select {
+  width: 100px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 12px;
+}
+.cell-select:focus { border-color: var(--accent); outline: none; }

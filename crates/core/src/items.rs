@@ -200,6 +200,12 @@ pub enum ItemEdit {
         stat: u16,
         /// 新数值。
         value: i64,
+        /// 层（参数位）。带参数位的属性同一 ID 会有多条记录，靠它区分：
+        /// `item_addclassskills` 的层是职业行号、`item_aura` 的层是光环 ID。
+        ///
+        /// 不给时按 0 处理（普通属性都是 0）。
+        #[serde(default)]
+        layer: Option<i32>,
     },
     /// 删除一个属性。
     RemoveStat {
@@ -207,6 +213,11 @@ pub enum ItemEdit {
         index: usize,
         /// 属性 ID。
         stat: u16,
+        /// 层（参数位），含义同 [`Self::SetStat::layer`]。
+        ///
+        /// 不给时删掉该 ID 的**全部**记录（保持旧的调用行为）。
+        #[serde(default)]
+        layer: Option<i32>,
     },
     /// 移动物品到某个格子（只改坐标，不改容器/页码）。
     MoveTo {
@@ -658,23 +669,24 @@ impl EditSession {
                     item.position.mode = ItemMode::Equipped;
                 }
             }
-            ItemEdit::SetStat { index, stat, value } => {
+            ItemEdit::SetStat {
+                index,
+                stat,
+                value,
+                layer,
+            } => {
                 let item = self.item_mut_on(target, *index)?;
-                let id = StatId(*stat);
-                match item.stats.iter_mut().find(|s| s.id == id && s.layer == 0) {
-                    Some(existing) => existing.value = *value,
-                    None => item.stats.push(Stat {
-                        id,
-                        value: *value,
-                        layer: 0,
-                    }),
-                }
+                set_stat_on(&mut item.stats, StatId(*stat), *value, *layer)?;
             }
-            ItemEdit::RemoveStat { index, stat } => {
+            ItemEdit::RemoveStat { index, stat, layer } => {
                 let item = self.item_mut_on(target, *index)?;
                 let id = StatId(*stat);
                 let before = item.stats.len();
-                item.stats.retain(|s| s.id != id);
+                // 指定了层就只删那一条；没指定则删该 ID 的全部（保持旧行为）
+                match layer {
+                    Some(wanted) => item.stats.retain(|s| !(s.id == id && s.layer == *wanted)),
+                    None => item.stats.retain(|s| s.id != id),
+                }
                 if item.stats.len() == before {
                     return Err(EditError::Invalid(format!("该物品没有属性 ID {stat}")));
                 }
@@ -857,6 +869,50 @@ pub fn body_location_from_name(name: &str) -> Option<d2s::BodyLocation> {
     None
 }
 
+/// 在属性列表上设置一条属性（**按 `id + layer` 精确定位**）。
+///
+/// 抽成独立函数是为了能单测这条最容易出错的匹配逻辑。
+///
+/// ## 为什么必须带 layer
+///
+/// 带参数位的属性（`ItemStatCost` 里 `Save Param Bits > 0`，共 17 条）
+/// 同一 ID 会有多条记录，靠层区分：`item_addclassskills` 的层是职业行号、
+/// `item_aura` 的层是光环 ID。
+///
+/// 以前无条件匹配 `layer == 0`，层非 0 的属性永远找不到，于是每次
+/// "应用修改"都**新增一条**——用户改了值，存档里却多出一条，
+/// 越改越乱（这就是"小型神符值不对"的真正原因）。
+///
+/// 语义：
+/// - `layer = Some(n)`：只改层 `n` 那一条；**找不到就报错**，不静默新增
+///   （否则用户以为改好了，其实多了一条）。
+/// - `layer = None`：按层 0 找；找不到就新增一条层 0 的记录
+///   （这是"添加属性"按钮的用法）。
+fn set_stat_on(
+    stats: &mut Vec<Stat>,
+    id: StatId,
+    value: i64,
+    layer: Option<i32>,
+) -> Result<(), EditError> {
+    let wanted = layer.unwrap_or(0);
+    if let Some(existing) = stats.iter_mut().find(|s| s.id == id && s.layer == wanted) {
+        existing.value = value;
+        return Ok(());
+    }
+    if layer.is_some() {
+        return Err(EditError::Invalid(format!(
+            "该物品没有属性 ID {}（层 {wanted}）",
+            id.0
+        )));
+    }
+    stats.push(Stat {
+        id,
+        value,
+        layer: wanted,
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -884,5 +940,65 @@ mod tests {
         assert!(body_location_from_name("Head").is_some());
         assert!(body_location_from_name("head").is_some(), "大小写不敏感");
         assert!(body_location_from_name("nope").is_none());
+    }
+
+    /// **按层精确定位**：带参数位的属性同一 ID 有多条。
+    ///
+    /// 这是"小型神符值不对"的根因：以前无条件匹配 `layer == 0`，
+    /// 层非 0 的属性永远找不到，于是每次应用都新增一条。
+    #[test]
+    fn set_stat_matches_by_layer() {
+        // item_aura（151）两条记录，层不同：122 和 123
+        let mut stats = vec![
+            Stat {
+                id: StatId(151),
+                value: 10,
+                layer: 122,
+            },
+            Stat {
+                id: StatId(151),
+                value: 20,
+                layer: 123,
+            },
+        ];
+        // 改层 123 那条：只动它，不能新增
+        set_stat_on(&mut stats, StatId(151), 31, Some(123)).unwrap();
+        assert_eq!(stats.len(), 2, "不该新增记录");
+        assert_eq!(stats[1].value, 31);
+        assert_eq!(stats[0].value, 10, "层 122 那条不受影响");
+
+        // 改层 122 那条
+        set_stat_on(&mut stats, StatId(151), 7, Some(122)).unwrap();
+        assert_eq!(stats.len(), 2);
+        assert_eq!(stats[0].value, 7);
+
+        // 指定一个不存在的层 → 报错，而不是新增
+        let err = set_stat_on(&mut stats, StatId(151), 5, Some(999));
+        assert!(err.is_err(), "指定了不存在的层应当报错");
+        assert_eq!(stats.len(), 2, "报错时不能留下多余记录");
+
+        // 不改层（layer = None）→ 找不到就新增一条层 0 的记录
+        set_stat_on(&mut stats, StatId(151), 3, None).unwrap();
+        assert_eq!(stats.len(), 3);
+        assert_eq!(stats[2].layer, 0);
+        // 再来一次要改那一条，而不是再加
+        set_stat_on(&mut stats, StatId(151), 9, None).unwrap();
+        assert_eq!(stats.len(), 3);
+        assert_eq!(stats[2].value, 9);
+    }
+
+    /// 普通属性（层恒为 0）反复设置不能越改越多。
+    #[test]
+    fn set_stat_is_idempotent_for_layer_zero() {
+        let mut stats = vec![Stat {
+            id: StatId(7),
+            value: 100,
+            layer: 0,
+        }];
+        for v in [101, 102, 103] {
+            set_stat_on(&mut stats, StatId(7), v, Some(0)).unwrap();
+        }
+        assert_eq!(stats.len(), 1, "同一条属性反复改不该变多");
+        assert_eq!(stats[0].value, 103);
     }
 }

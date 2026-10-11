@@ -9,8 +9,8 @@ use d2r_data::{ItemNamer, SkillNamer, Strings, TableStore};
 
 use crate::dto::{
     AppError, CharacterDto, DatasetInfo, EditRequest, ItemDetailDto, ItemDto, ItemStatDto,
-    QuestDifficultyDto, QuestDto, SaveInfo, SaveResult, SkillDto, SkillTreeDto, SkillsViewDto,
-    VerifyResult, WaypointsDto,
+    ParamOptionDto, QuestDifficultyDto, QuestDto, SaveInfo, SaveResult, SkillDto, SkillTreeDto,
+    SkillsViewDto, VerifyResult, WaypointsDto,
 };
 
 /// 保存结果（内部形态，含是否备份）。
@@ -515,6 +515,71 @@ impl Workspace {
             .collect()
     }
 
+    /// 某个属性的**层（参数）可选值**，供界面做下拉框。
+    ///
+    /// 只有含义已经查实的属性才给选项，其余返回空（界面就只显示层号）。
+    /// 这样用户可以像游戏里那样选"法师"，而不是去猜层号。
+    fn param_options_for(
+        &mut self,
+        id: u16,
+        skills: &std::collections::HashMap<u16, String>,
+        classes: &std::collections::HashMap<u16, String>,
+    ) -> Vec<ParamOptionDto> {
+        if !self
+            .stat_limits
+            .get(id)
+            .map(|l| l.has_param_bits)
+            .unwrap_or(false)
+        {
+            return Vec::new();
+        }
+        match id {
+            // item_addclassskills：层 = 职业行号
+            83 => {
+                let mut rows: Vec<(u16, String)> =
+                    classes.iter().map(|(k, v)| (*k, v.clone())).collect();
+                rows.sort_by_key(|(k, _)| *k);
+                rows.into_iter()
+                    .map(|(layer, label)| ParamOptionDto {
+                        layer: layer as i32,
+                        label,
+                    })
+                    .collect()
+            }
+            // item_aura：层 = 光环 ID（列表较长，但用户需要能换光环）
+            151 => {
+                // 只列游戏里作为物品光环出现的那批（`skills.txt` 里带 aura 的），
+                // 否则几百个技能混进来反而没法选。
+                let mut rows: Vec<(u16, String)> = skills
+                    .iter()
+                    .filter(|(id, _)| self.is_item_aura(**id))
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect();
+                rows.sort_by_key(|(k, _)| *k);
+                rows.into_iter()
+                    .map(|(layer, label)| ParamOptionDto {
+                        layer: layer as i32,
+                        label,
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    /// 该技能 ID 是不是"能作为物品光环"的光环技能。
+    ///
+    /// 判据：`skills.txt` 的 `aura` 列为真（游戏就是用这一列把技能标成光环的）。
+    fn is_item_aura(&mut self, skill_id: u16) -> bool {
+        let Some(table) = self.tables.get("skills") else {
+            return false;
+        };
+        (0..table.len()).any(|row| {
+            table.int(row, "*Id") == Some(skill_id as i64)
+                && table.int(row, "aura").unwrap_or(0) != 0
+        })
+    }
+
     /// 技能名（`skills.txt` 的 `skill` 列英文值）→ 技能 ID。
     ///
     /// **直接用表里的 `skill` 列**，不要用解析出来的显示名：显示名是本地化的
@@ -795,6 +860,27 @@ impl Workspace {
         // 不能再调 `&mut self` 的方法（会借用冲突）。
         let skill_names = self.skill_local_names();
         let class_names = self.class_local_names();
+        // 参数下拉的可选值：闭包里有 `&self` 借用，所以在这里先算好。
+        // 只有带参数位的属性（ItemStatCost 里 `Save Param Bits > 0`，共 17 条）
+        // 才需要，其余跳过以免白算。
+        let param_ids: Vec<u16> = detail
+            .stats
+            .iter()
+            .map(|(id, _, _)| *id)
+            .filter(|id| {
+                self.stat_namer
+                    .get(*id)
+                    .map(|s| s.has_param_bits)
+                    .unwrap_or(false)
+            })
+            .collect();
+        let param_options: std::collections::HashMap<u16, Vec<ParamOptionDto>> = param_ids
+            .into_iter()
+            .map(|id| {
+                let opts = self.param_options_for(id, &skill_names, &class_names);
+                (id, opts)
+            })
+            .collect();
         let mut stats: Vec<ItemStatDto> = detail
             .stats
             .iter()
@@ -845,6 +931,7 @@ impl Workspace {
                         &class_names,
                     ),
                     has_layer: info.map(|s| s.has_param_bits).unwrap_or(false),
+                    param_options: param_options.get(id).cloned().unwrap_or_default(),
                 }
             })
             .collect();
@@ -1030,11 +1117,17 @@ impl Workspace {
         edits
             .iter()
             .map(|e| match e {
-                ItemEdit::SetStat { index, stat, value } => ItemEdit::SetStat {
+                ItemEdit::SetStat {
+                    index,
+                    stat,
+                    value,
+                    layer,
+                } => ItemEdit::SetStat {
                     index: *index,
                     stat: *stat,
-                    // 界面给的是用户可见值（按等级的是每级小数），换算回存档整数
+                    // 界面给的就是存档里的值（按数据大小处理），这里只是补齐类型
                     value: self.stat_limits.display_to_raw(*stat, *value as f64),
+                    layer: *layer,
                 },
                 ItemEdit::ReplaceStats { index, stats } => ItemEdit::ReplaceStats {
                     index: *index,
@@ -1075,7 +1168,12 @@ impl Workspace {
         let mut problems: Vec<String> = Vec::new();
         for e in edits {
             let (index, wanted): (usize, Vec<(u16, i64)>) = match e {
-                ItemEdit::SetStat { index, stat, value } => (*index, vec![(*stat, *value)]),
+                ItemEdit::SetStat {
+                    index,
+                    stat,
+                    value,
+                    layer: _,
+                } => (*index, vec![(*stat, *value)]),
                 ItemEdit::ReplaceStats { index, stats } => {
                     (*index, stats.iter().map(|(s, v, _)| (*s, *v)).collect())
                 }
