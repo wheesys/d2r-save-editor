@@ -339,6 +339,36 @@ console.log("=== 7. 新增属性一行：搜索框 + 值2 控件 ===");
     ...js.matchAll(/add-stat-select"\) as HTMLSelectElement;[\s\S]{0,60}?sel\.innerHTML/g),
   ].length;
   check("目录下拉只在一处填充（便于搜索统一过滤）", directFills === 0, `仍有 ${directFills} 处直接填充`);
+
+  // 属性行的收集**必须限定在 `#item-stats` 内**。
+  // 曾经是全文档查询，把"新增属性"那一行的值2 控件也当成属性行收集了，
+  // 于是报"该物品没有属性 ID 151（层 98）"——新增属性里填的值被当成
+  // 某条已有属性的值2 提交出去。
+  const unscoped = [
+    ...js.matchAll(
+      /document\.querySelectorAll<[^>]*>\("(?:input\[data-stat-id\]|\[data-stat-layer-sel\]|input\[data-stat-layer-sel\]\])"/g,
+    ),
+  ].length;
+  check("属性行的收集没有全文档查询", unscoped === 0, `有 ${unscoped} 处未限定范围`);
+  check(
+    "属性行收集限定在 item-stats 内",
+    (js.match(/\$\("#item-stats"\)\s*\n?\s*\.querySelectorAll/g) ?? []).length >= 2,
+  );
+  // 改了就生效：值1 失焦、值2 变更要接到自动提交上
+  check("值1 失焦即生效", js.includes('el.addEventListener("blur"') && js.includes("applyRowNow"));
+  check("值2 变更即生效", /addEventListener\("change", \(\) => void applyRowNow/.test(js));
+  // 「应用修改」按钮已按用户要求**完全去掉**：属性与基础字段都是改了就生效
+  check("已去掉「应用修改」按钮", !page.includes("btn-apply-detail"));
+  check("已去掉它的处理函数", !js.includes("applyDetailEdits"));
+  check("基础字段也失焦即生效", js.includes("bindDetailFieldAutoApply"));
+  // 光环可选值写死成常量（不再每次启动扫表）
+  const backend = readFileSync(new URL("../crates/app/src/workspace.rs", import.meta.url), "utf8");
+  check("光环 ID 已写成常量", backend.includes("ITEM_AURA_SKILL_IDS"));
+  check(
+    "光环常量是 21 个圣骑士光环",
+    /ITEM_AURA_SKILL_IDS: \[u16; 21\]/.test(backend),
+    "数量与写死时的不一致",
+  );
 }
 
 console.log("");

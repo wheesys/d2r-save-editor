@@ -569,14 +569,45 @@ impl Workspace {
                     })
                     .collect()
             }
-            // item_aura：层 = 光环 ID（列表较长，但用户需要能换光环）
+            // item_aura：层 = 光环 ID
             151 => {
-                // 只列游戏里作为物品光环出现的那批（`skills.txt` 里带 aura 的），
-                // 否则几百个技能混进来反而没法选。
-                let mut rows: Vec<(u16, String)> = skills
+                // 可选值就是**圣骑士的 21 个光环**。
+                //
+                // 这里是**写死的常量**，不在每次运行时扫 `skills.txt`：
+                // 这些 ID 是游戏的固定事实（和装备位布局一样），每次开程序
+                // 都扫一遍纯属浪费；而且判据一改就容易出错——之前查了一个
+                // 不存在的 `aura` 列，过滤形同虚设，把野蛮人的几种"精通"
+                // 混了进来（用户反馈过）。
+                //
+                // 常量的来源（写死前实测过）：`skills.txt` 里
+                // `charclass == "pal"` 且 `aurastate` 非空的技能，正好这 21 条。
+                // 名字仍按当前语言从技能表取（**ID 才是固定事实，名字是本地化的**）。
+                const ITEM_AURA_SKILL_IDS: [u16; 21] = [
+                    98,  // Might 力量
+                    99,  // Prayer 祈祷
+                    100, // Resist Fire 抗火
+                    102, // Holy Fire 神圣之火
+                    103, // Thorns 荆棘
+                    104, // Defiance 反抗
+                    105, // Resist Cold 抗冰
+                    108, // Blessed Aim 祝福瞄准
+                    109, // Cleansing 净化
+                    110, // Resist Lightning 抗雷
+                    113, // Concentration 专注
+                    114, // Holy Freeze 神圣之冰
+                    115, // Vigor 精力
+                    117, // Holy Shield 圣盾术
+                    118, // Holy Shock 神圣之雷
+                    119, // Sanctuary 庇护之光
+                    120, // Meditation 冥思
+                    122, // Fanaticism 狂热
+                    123, // Conviction 定罪
+                    124, // Redemption 救赎
+                    125, // Salvation 拯救
+                ];
+                let mut rows: Vec<(u16, String)> = ITEM_AURA_SKILL_IDS
                     .iter()
-                    .filter(|(id, _)| self.is_item_aura(**id))
-                    .map(|(k, v)| (*k, v.clone()))
+                    .filter_map(|id| skills.get(id).map(|name| (*id, name.clone())))
                     .collect();
                 rows.sort_by_key(|(k, _)| *k);
                 rows.into_iter()
@@ -588,19 +619,6 @@ impl Workspace {
             }
             _ => Vec::new(),
         }
-    }
-
-    /// 该技能 ID 是不是"能作为物品光环"的光环技能。
-    ///
-    /// 判据：`skills.txt` 的 `aura` 列为真（游戏就是用这一列把技能标成光环的）。
-    fn is_item_aura(&mut self, skill_id: u16) -> bool {
-        let Some(table) = self.tables.get("skills") else {
-            return false;
-        };
-        (0..table.len()).any(|row| {
-            table.int(row, "*Id") == Some(skill_id as i64)
-                && table.int(row, "aura").unwrap_or(0) != 0
-        })
     }
 
     /// 技能名（`skills.txt` 的 `skill` 列英文值）→ 技能 ID。

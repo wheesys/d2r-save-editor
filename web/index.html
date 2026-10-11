@@ -214,7 +214,7 @@
         <div class="add-stat">
           <span class="add-stat-label">新增属性</span>
           <!-- 属性有 300 多条，先搜索再选；搜索框留空时下拉列出全部 -->
-          <input id="add-stat-search" type="text" placeholder="搜索属性…" title="按属性名或内部名筛选" />
+          <input id="add-stat-search" type="text" title="按属性名或内部名筛选" placeholder="搜索" />
           <select id="add-stat-select" title="选择要添加的属性"></select>
           <input id="add-stat-value" type="text" inputmode="numeric" value="1" title="值1" />
           <!-- 值2：带参数位的属性才有。有已知可选值时由脚本换成下拉框 -->
@@ -224,9 +224,11 @@
         <!-- 选中属性后立刻显示它的有效范围，免得填了才被拒 -->
         <div id="add-stat-hint" class="muted"></div>
 
+        <!-- 「应用修改」按钮已去掉：属性值/值2/删除都是**改了就生效**，
+             物品基础字段（耐久/数量/孔数/防御）同样改成失焦即生效，
+             所以不需要再点一次按钮。 -->
         <div class="actions">
           <button id="btn-export-item">导出为蓝图</button>
-          <button id="btn-apply-detail" class="primary">应用修改</button>
         </div>
         <div id="detail-result" class="muted"></div>
       </div>

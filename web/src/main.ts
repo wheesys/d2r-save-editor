@@ -443,7 +443,6 @@ function openItemModal() {
 /** 关闭物品属性弹窗 */
 function closeItemModal() {
   $("#item-modal").classList.add("hidden");
-  pendingDetailEdits.length = 0;
 }
 
 /** 当前弹窗里展示的属性（收集改动时用来判断"有没有真的变"）。 */
@@ -487,28 +486,48 @@ function renderItemDetail(detail: ItemDetailDto) {
   // `renderStatRow` 已经把值写进 `value` 属性（浏览器解析 HTML 时同步建立，
   // 不依赖脚本执行）；这里再赋一次，兜住属性解析异常的情况。
   // 两条路径任一条可用，值就不会空白。
-  document.querySelectorAll<HTMLInputElement>("input[data-stat-id]").forEach((el) => {
-    const stat = detail.stats.find(
-      (s) => s.id === Number(el.dataset.statId) && s.layer === Number(el.dataset.statLayer),
-    );
-    if (stat) el.value = statValueText(stat);
-  });
+  //
+  // 查询**限定在 `#item-stats` 内**：全文档查询会把别处同名的元素也捞进来
+  // （属性行的收集曾经因此把"新增属性"那一行的值2 当成已有属性提交）。
+  $("#item-stats")
+    .querySelectorAll<HTMLInputElement>("input[data-stat-id]")
+    .forEach((el) => {
+      const stat = detail.stats.find(
+        (s) => s.id === Number(el.dataset.statId) && s.layer === Number(el.dataset.statLayer),
+      );
+      if (stat) el.value = statValueText(stat);
+    });
 
-  // 删除属性按钮
+  // 改了就生效：值1 失焦 / 值2 变更时只提交这一行
+  bindStatRowAutoApply();
+  // 基础字段（孔数/耐久/数量/防御）同样失焦即生效（不再有「应用修改」按钮）
+  bindDetailFieldAutoApply();
+
+  // 删除属性：**立即生效**（和值、值2 一致，不再需要另点「应用修改」）
   document.querySelectorAll<HTMLButtonElement>("button[data-del-stat]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      pendingDetailEdits.push({
-        kind: "removeStat",
-        index: it.index,
-        stat: Number(btn.dataset.delStat),
-      });
-      toast("已记录删除，点弹窗里的「应用修改」生效");
+      void removeStatNow(Number(btn.dataset.delStat), Number(btn.dataset.delLayer));
     });
   });
 }
 
-/** 明细面板里挂起的改动（删除属性等） */
-const pendingDetailEdits: ItemEdit[] = [];
+/** 立即删除一条属性（按 `stat + layer` 精确定位，否则会同 ID 全删）。 */
+async function removeStatNow(stat: number, layer: number) {
+  if (selectedItem === null) return;
+  try {
+    await call<number>("apply_item_edits", {
+      edits: [
+        { kind: "removeStat", index: selectedItem, stat, layer: layer === 0 ? undefined : layer },
+      ],
+      target: selectedTarget,
+    });
+    toast(`已删除：属性 ${stat}${layer === 0 ? "" : `（值2 = ${layer}）`}。点「保存」才写入文件。`);
+    $("#detail-result").textContent = "";
+    await reloadItemDetail();
+  } catch (e) {
+    showError(e, "删除属性被拒绝");
+  }
+}
 
 /**
  * 「添加」属性：**立即生效**，不再需要另点「应用修改」。
@@ -627,6 +646,8 @@ function renderAddStatValue2(id: number) {
           .map((o) => `<option value="${o.layer}">${escapeHtml(o.label)}</option>`)
           .join("")}</select>`
       : `<input id="add-stat-value2" type="text" inputmode="numeric" value="0" title="值2（参数）" />`;
+  // 注意：新增属性的值2 **不用** `data-stat-layer-sel`，
+  // 那个属性名属于属性表里的行；共用会被 collectDetailEdits 误当成行改动。
 }
 
 /** 读"值2"控件当前的值；没有控件时返回 `undefined`（表示不带参数）。 */
@@ -681,76 +702,152 @@ async function reloadItemDetail() {
   openItemModal();
 }
 
-/** 收集明细面板的改动 */
-function collectDetailEdits(): ItemEdit[] {
-  const edits: ItemEdit[] = [...pendingDetailEdits];
-  const index = selectedItem;
-  if (index === null) return edits;
-  const it = items.find((i) => i.index === index);
-  if (!it) return edits;
 
-  const num = (sel: string): number | null => {
-    const el = $(sel) as HTMLInputElement;
-    if (el.disabled || el.value === "") return null;
-    return Number(el.value);
-  };
-  const sockets = num("#d-sockets");
-  if (sockets !== null && sockets !== it.socketCount) {
-    edits.push({ kind: "setSockets", index, count: sockets });
+/**
+ * 改了就生效：只把**这一行**的改动提交到后端，成功后再读回刷新。
+ *
+ * 为什么只提交一行而不是整表：整表提交会把别的输入框里"看起来变了的"
+ * 值一起写进去，用户只想改一个数却连带改了别的（之前踩过）。
+ */
+async function applyRowNow(stat: number, rowLayer: number) {
+  if (selectedItem === null) return;
+  const el = $(`#item-stats input[data-stat-id="${stat}"][data-stat-layer="${rowLayer}"]`) as
+    | HTMLInputElement
+    | null;
+  if (!el) return;
+  const original = detailStats.find((s) => s.id === stat && s.layer === rowLayer);
+  if (!original) return;
+
+  const value = Number(el.value);
+  const problem = statValueProblem(stat, value, el);
+  if (problem) {
+    $("#detail-result").innerHTML = `<div class="problem">${escapeHtml(problem)}</div>`;
+    return;
   }
-  const dur = num("#d-durability");
-  if (dur !== null && dur !== it.durability) edits.push({ kind: "setDurability", index, value: dur });
-  const qty = num("#d-quantity");
-  if (qty !== null && qty !== it.quantity) edits.push({ kind: "setQuantity", index, value: qty });
-  const def = num("#d-defense");
-  if (def !== null && def !== it.defense) edits.push({ kind: "setDefense", index, value: def });
 
-  // 属性值：**只发送真正改动的**。
-  //
-  // 以前无条件把所有输入框都发出去，而后端按 `stat + layer` 定位：
-  // 带参数位的属性（层非 0，如 item_aura 层 123）在旧逻辑里永远匹配不上，
-  // 于是每次"应用修改"都**新增一条**，存档越改越乱。
-  // 现在两边都按 `stat + layer` 精确处理，并且不再发没改的。
-  collectProblems.length = 0;
-  const originalOf = (stat: number, layer: number) =>
-    detailStats.find((s) => s.id === stat && s.layer === layer);
-  document.querySelectorAll<HTMLInputElement>("input[data-stat-id]").forEach((el) => {
-    const stat = Number(el.dataset.statId);
-    const layer = Number(el.dataset.statLayer);
-    const value = Number(el.value);
-    const original = originalOf(stat, layer);
-    // 前端先按输入框上的范围/步长拦一道，给出**具体到哪条属性**的提示，
-    // 而不是等后端拒绝后只看到一句"ID 7 的值 100 存不进去"。
-    // 后端仍会再校验一次（前端只是让提示更好懂，不替代后端校验）。
-    const problem = statValueProblem(stat, value, el);
-    if (problem) collectProblems.push(problem);
-    // 值没变就不发（避免把 layer 非 0 的属性重复写一遍）
-    if (original && original.value === value) return;
-    edits.push({ kind: "setStat", index, stat, value, layer });
-  });
+  const sel = $(`#item-stats [data-stat-layer-sel="${stat}"][data-stat-layer-cur="${rowLayer}"]`) as
+    | HTMLInputElement
+    | HTMLSelectElement
+    | null;
+  const newLayer = sel === null ? undefined : Number(sel.value);
+  const layerChanged = newLayer !== undefined && !Number.isNaN(newLayer) && newLayer !== rowLayer;
+  const valueChanged = value !== original.value;
+  if (!layerChanged && !valueChanged) return;
 
-  // 值2 的改动：与原始值比较，不同才发。
-  // 下拉框（有已知可选值）和数字输入框（没有）都走这里。
-  document.querySelectorAll<HTMLElement>("[data-stat-layer-sel]").forEach((el) => {
-    const stat = Number(el.dataset.statLayerSel);
-    const current = Number(el.dataset.statLayerCur);
-    const next = Number((el as HTMLInputElement | HTMLSelectElement).value);
-    if (Number.isNaN(next) || next === current) return;
-    const original = originalOf(stat, current);
-    // 值2 的改动本质是"把这条属性挪到另一个参数上"，值1 保持不变
-    edits.push({
-      kind: "setStat",
-      index,
-      stat,
-      value: original ? original.value : 0,
-      layer: next,
+  const edit: ItemEdit = layerChanged
+    ? { kind: "setStat", index: selectedItem, stat, value, layer: newLayer }
+    : { kind: "setStat", index: selectedItem, stat, value, layer: rowLayer };
+
+  const shown = rowLayer === 0 ? `属性 ${stat}` : `属性 ${stat}（值2 = ${rowLayer}）`;
+  try {
+    await call<number>("apply_item_edits", {
+      edits: [edit],
+      target: selectedTarget,
     });
-  });
-  return edits;
+    toast(`已改：${shown}。点「保存」才写入文件。`);
+    $("#detail-result").textContent = "";
+    await reloadItemDetail();
+  } catch (e) {
+    showError(e, `修改「${shown}」被拒绝`);
+  }
 }
 
-/// 收集时发现的非法值（由调用方读取后提示；避免为它多加返回值）。
-const collectProblems: string[] = [];
+/**
+ * 把属性表里每一行的输入框与选择框接上"改了就生效"。
+ *
+ * 触发时机用 `blur` 而不是 `input`：用户打字过程中每敲一个字符就提交
+ * 会写出一串中间值（例如把 7 改成 31 会先写 3），既慢又容易写坏存档。
+ */
+function bindStatRowAutoApply() {
+  $("#item-stats")
+    .querySelectorAll<HTMLInputElement>("input[data-stat-id]")
+    .forEach((el) => {
+      const stat = Number(el.dataset.statId);
+      const layer = Number(el.dataset.statLayer);
+      el.addEventListener("blur", () => void applyRowNow(stat, layer));
+      // 回车也触发一次，符合"填完就提交"的直觉（blur 随后会到，但相等时会自动跳过）
+      el.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") void applyRowNow(stat, layer);
+      });
+    });
+  $("#item-stats")
+    .querySelectorAll<HTMLElement>("[data-stat-layer-sel]")
+    .forEach((el) => {
+      const stat = Number(el.dataset.statLayerSel);
+      const layer = Number(el.dataset.statLayerCur);
+      el.addEventListener("change", () => void applyRowNow(stat, layer));
+    });
+  // 值2 直接输入的场合（没有可选列表）：失焦时同样按整行提交
+  $("#item-stats")
+    .querySelectorAll<HTMLInputElement>("input[data-stat-layer-sel]")
+    .forEach((el) => {
+      const stat = Number(el.dataset.statLayerSel);
+      const layer = Number(el.dataset.statLayerCur);
+      el.addEventListener("blur", () => void applyRowNow(stat, layer));
+    });
+}
+
+/**
+ * 物品基础字段（孔数/耐久/数量/防御）也做成**失焦即生效**。
+ *
+ * 「应用修改」按钮已去掉，所以这些字段必须自己提交，否则改了不会保存。
+ * 触发用 `blur`（不是 `input`）：打字过程中每敲一下都提交会写出一串中间值。
+ */
+function bindDetailFieldAutoApply() {
+  const fields: {
+    sel: string;
+    build: (index: number, value: number) => ItemEdit;
+    /** 取当前物品上的原值，用来判断有没有真的改 */
+    original: (item: ItemDto) => number | null;
+  }[] = [
+    {
+      sel: "#d-sockets",
+      build: (index, count) => ({ kind: "setSockets", index, count }),
+      original: (item) => item.socketCount,
+    },
+    {
+      sel: "#d-durability",
+      build: (index, value) => ({ kind: "setDurability", index, value }),
+      original: (item) => item.durability,
+    },
+    {
+      sel: "#d-quantity",
+      build: (index, value) => ({ kind: "setQuantity", index, value }),
+      original: (item) => item.quantity,
+    },
+    {
+      sel: "#d-defense",
+      build: (index, value) => ({ kind: "setDefense", index, value }),
+      original: (item) => item.defense,
+    },
+  ];
+  for (const field of fields) {
+    const el = $(field.sel) as HTMLInputElement;
+    el.addEventListener("blur", () => {
+      const index = selectedItem;
+      if (index === null || el.disabled || el.value === "") return;
+      const item = items.find((i) => i.index === index);
+      if (!item) return;
+      const value = Number(el.value);
+      if (Number.isNaN(value) || value === field.original(item)) return;
+      void applyBaseFieldNow(field.build(index, value));
+    });
+  }
+}
+
+/** 提交一个基础字段的改动，成功后重新读明细刷新界面。 */
+async function applyBaseFieldNow(edit: ItemEdit) {
+  try {
+    await call<number>("apply_item_edits", { edits: [edit], target: selectedTarget });
+    toast("已改。点「保存」才写入文件。");
+    $("#detail-result").textContent = "";
+  } catch (e) {
+    showError(e, "修改被拒绝");
+  }
+  // 成功与失败都重新读一遍：成功是让用户看到规范化后的结果，
+  // 失败是把界面上的值退回存档里的值（避免显示与存档不一致）。
+  await reloadItemDetail();
+}
 
 /**
  * 检查一个属性值是否可表示；不可表示时返回可读原因。
@@ -777,41 +874,6 @@ function statValueProblem(id: number, value: number, el: HTMLInputElement): stri
     return `属性 ID ${id} 的值 ${value} 超过可表示的最大值 ${max}`;
   }
   return null;
-}
-
-/** 应用明细面板的改动 */
-async function applyDetailEdits() {
-  const edits = collectDetailEdits();
-  // 有不可表示的值就**先不提交**，把每条原因列出来：
-  // 这些值写进去会被静默截断，或者让整条属性消失，必须让用户先改对。
-  if (collectProblems.length > 0) {
-    $("#detail-result").innerHTML = collectProblems
-      .map((p) => `<div class="problem">${escapeHtml(p)}</div>`)
-      .join("");
-    showError(new Error(collectProblems[0]), `${collectProblems.length} 个属性值不可表示`);
-    return;
-  }
-  if (edits.length === 0) {
-    toast("没有需要应用的修改", "error");
-    return;
-  }
-  try {
-    const n = await call<number>("apply_item_edits", { edits, target: selectedTarget });
-    pendingDetailEdits.length = 0;
-    $("#detail-result").textContent = "";
-    toast(`已应用 ${n} 条修改。点「保存」才会写入文件。`);
-    const keep = selectedItem;
-    await loadAll();
-    // 重新读一遍这件物品并保持弹窗打开（值可能被规范化，要让用户看到结果）
-    if (keep !== null) {
-      const detail = await call<ItemDetailDto>("item_detail", { index: keep });
-      renderItemDetail(detail);
-      openItemModal();
-    }
-  } catch (e) {
-    showError(e, "修改被拒绝");
-    $("#detail-result").textContent = String((e as { message?: string })?.message ?? e);
-  }
 }
 
 /** 载入属性目录并填充下拉 */
@@ -1244,7 +1306,6 @@ function clearEmptyState() {
 
 function bind() {
   // 明细面板：应用该物品的修改 / 添加属性
-  $("#btn-apply-detail").addEventListener("click", applyDetailEdits);
   $("#btn-add-stat").addEventListener("click", addStatNow);
 
   // 选中的属性要在**添加之前**就告诉他最大/最小值（否则填了才知道超范围）
