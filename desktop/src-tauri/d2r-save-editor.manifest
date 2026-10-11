@@ -1,40 +1,58 @@
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <!--
-  应用清单：声明本程序需要以管理员身份运行。
+  Application manifest: request administrator privileges.
 
-  为什么需要：D2R 的存档放在 `%USERPROFILE%\Saved Games\Diablo II Resurrected`，
-  这个目录在不少机器上受 Windows 安全中心的「受控文件夹访问」（勒索软件防护）保护，
-  普通权限进程写不进去，表现为保存时报「拒绝访问 (os error 5)」。
+  WHY: Diablo II Resurrected stores saves under the user profile's Saved Games
+  folder. On many machines that folder is protected by Windows Security's
+  Controlled Folder Access (ransomware protection), so a non-elevated process
+  cannot write there and saving fails with "Access is denied (os error 5)".
+  Telling users to allowlist the app or disable that protection is unrealistic:
+  users simply give up when saving fails. Save editors requesting administrator
+  rights is standard for this category, so we declare UAC elevation and the user
+  just clicks Yes once.
 
-  让普通用户去"把程序加入允许的应用"或"关掉勒索软件防护"是不现实的——用户遇到
-  保存失败只会放弃。存档修改器需要管理员权限是这个品类的通行做法，所以直接声明
-  UAC 提权，用户只需在弹窗上点「是」。
+  HARD CONSTRAINTS (all of these were hit for real):
 
-  清单要遵守 Windows 的 schema，否则启动会报「并行配置不正确」：
-  - `assemblyIdentity` 必须有 `language`（缺了就会 sxs 报错，踩过）；
-  - `Common-Controls v6` 的依赖**必须保留**，Tauri 的对话框 API 依赖它；
-  - 不要加 `compatibility/supportedOS`——对本程序没有必要，多一处出错机会。
+  1. This file MUST stay pure ASCII. Tauri rewrites the manifest into a .rc
+     resource using the local ANSI codepage, but the manifest declares UTF-8.
+     Any non-ASCII character (a Chinese description, for example) therefore
+     lands as mismatched bytes and Windows rejects the whole manifest with
+     SideBySide "activation context generation failed / invalid XML syntax".
+     User visible Chinese text belongs in the UI, not in this manifest.
+
+  2. XML comments must not contain two consecutive hyphens.
+
+  3. The top level assemblyIdentity must NOT declare language="*". Windows
+     rejects it with "the value * of attribute language in element
+     assemblyIdentity is invalid" and the app will not start at all. The
+     wildcard is only valid on the dependent Common Controls assembly below;
+     the top level one is fine without a language attribute.
+
+  The Common Controls v6 dependency is required by Tauri's dialog APIs.
+  Do not drop it.
 -->
-<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+<assembly
+  xmlns="urn:schemas-microsoft-com:asm.v1"
+  xmlns:asmv3="urn:schemas-microsoft-com:asm.v3"
+  manifestVersion="1.0"
+>
   <assemblyIdentity
     type="win32"
     name="D2RSaveEditor"
     version="1.0.0.0"
     processorArchitecture="*"
-    language="*"
   />
-  <description>D2R 存档修改器</description>
+  <description>D2R Save Editor</description>
 
-  <!-- 请求管理员权限（每次启动会弹 UAC） -->
-  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
-    <security>
-      <requestedPrivileges>
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
-      </requestedPrivileges>
-    </security>
-  </trustInfo>
+  <!-- Ask for administrator rights; UAC is shown on every launch. -->
+  <asmv3:trustInfo>
+    <asmv3:security>
+      <asmv3:requestedPrivileges>
+        <asmv3:requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+      </asmv3:requestedPrivileges>
+    </asmv3:security>
+  </asmv3:trustInfo>
 
-  <!-- Tauri 的对话框 API 需要它，不能省 -->
+  <!-- Required by Tauri's dialog APIs. -->
   <dependency>
     <dependentAssembly>
       <assemblyIdentity
