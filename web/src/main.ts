@@ -701,14 +701,15 @@ async function applyEdits(edits: Edit[], label: string) {
 }
 
 
-/** 读取并展示布局设置与"需要确认的项" */
+/**
+ * 读取并展示布局设置（在设置弹窗里）。
+ *
+ * 设置是全局的，所以**没打开存档时也要能用**：那种情况下拿不到"从存档推断"
+ * 的提示（后端需要会话），只显示当前设置值与说明。
+ */
 async function refreshLayout() {
   try {
-    const [settings, hints, questions] = await Promise.all([
-      call<LayoutSettings>("layout"),
-      call<LayoutHints>("layout_hints"),
-      call<string[]>("layout_questions"),
-    ]);
+    const settings = await call<LayoutSettings>("layout");
     ($("#l-inv-cols") as HTMLInputElement).value = String(settings.inventoryCols);
     ($("#l-inv-rows") as HTMLInputElement).value = String(settings.inventoryRows);
     ($("#l-cube-cols") as HTMLInputElement).value = String(settings.cubeCols);
@@ -717,25 +718,51 @@ async function refreshLayout() {
     ($("#l-stash-rows") as HTMLInputElement).value = String(settings.stashRows);
     ($("#l-merc") as HTMLInputElement).checked = settings.mercFullEquipment;
     // 记住布局并刷新容器网格：网格尺寸（背包/方块/箱子行列数）全部来自它。
-    // 漏了这三行会让 renderContainerView 恒早退，容器视图根本不渲染。
+    // 漏了赋值会让 renderContainerView 恒早退，容器视图根本不渲染。
     currentLayout = settings;
     renderContainerView();
 
-    const hint =
-      `推断：背包最大 (${hints.inventoryMax?.[0] ?? "-"},${hints.inventoryMax?.[1] ?? "-"})｜` +
-      `合成箱最大 (${hints.cubeMax?.[0] ?? "-"},${hints.cubeMax?.[1] ?? "-"})｜` +
-      `箱子坐标最大 (${hints.stashMax?.[0] ?? "-"},${hints.stashMax?.[1] ?? "-"})｜` +
-      `佣兵段 ${hints.mercSection ? `${hints.mercItems} 件` : "无"}`;
-    const confirmNote = settings.confirmedByUser ? "（已由你确认）" : "（当前是默认值）";
-    $("#layout-questions").innerHTML =
-      `<div class="muted">${hint}${confirmNote}</div>` +
-      (questions.length === 0
-        ? ""
-        : questions.map((q) => `<div class="question">需要确认：${q}</div>`).join(""));
-    $("#layout-section").classList.remove("hidden");
+    const confirmNote = settings.confirmedByUser
+      ? "（这些设置已保存，下次启动自动带上）"
+      : "（当前是默认值，确认后会记住）";
+    // 存档推断只在有会话时可用
+    let hint = "";
+    try {
+      const [hints, questions] = await Promise.all([
+        call<LayoutHints>("layout_hints"),
+        call<string[]>("layout_questions"),
+      ]);
+      hint =
+        `推断：背包最大 (${hints.inventoryMax?.[0] ?? "-"},${hints.inventoryMax?.[1] ?? "-"})｜` +
+        `合成箱最大 (${hints.cubeMax?.[0] ?? "-"},${hints.cubeMax?.[1] ?? "-"})｜` +
+        `箱子坐标最大 (${hints.stashMax?.[0] ?? "-"},${hints.stashMax?.[1] ?? "-"})｜` +
+        `佣兵段 ${hints.mercSection ? `${hints.mercItems} 件` : "无"}`;
+      const bullets = questions
+        .map((q) => `<div class="question">需要确认：${q}</div>`)
+        .join("");
+      $("#layout-questions").innerHTML =
+        `<div class="muted">${hint}${confirmNote}</div>${bullets}`;
+    } catch {
+      // 没打开存档：只给说明，不给"从存档推断"
+      $("#layout-questions").innerHTML =
+        `<div class="muted">当前没有打开存档，所以没有"从坐标推断"的提示。` +
+        `这些设置是全局的，改完保存即生效。${confirmNote}</div>`;
+    }
   } catch (e) {
     showError(e, "读取布局设置失败");
   }
+}
+
+/** 打开设置弹窗（设置与存档无关，所以随时可开）。 */
+async function openSettingsModal() {
+  $("#settings-modal").classList.remove("hidden");
+  $("#bounds-result").textContent = "";
+  await refreshLayout();
+}
+
+/** 关闭设置弹窗。 */
+function closeSettingsModal() {
+  $("#settings-modal").classList.add("hidden");
 }
 
 async function applyLayout() {
@@ -866,7 +893,6 @@ function renderEmptyState() {
     ["#inventory-section", "这里按容器网格显示物品栏（装备位 / 背包 / 方块 / 箱子 / 腰带）。"],
     ["#items-section", "这里显示物品清单。"],
     ["#merc-section", "这里显示佣兵装备。"],
-    ["#layout-section", "这里设置容器尺寸（mod 改动过、存档里读不出来的项）。"],
   ];
   for (const [sel, text] of placeholders) {
     const el = $(sel);
@@ -953,12 +979,19 @@ function bind() {
     }
   });
 
+  // 设置弹窗：工具栏按钮打开，关闭按钮 / 遮罩 / Esc 关闭
+  $("#btn-settings").addEventListener("click", () => void openSettingsModal());
+  document.querySelectorAll("[data-close-settings]").forEach((el) => {
+    el.addEventListener("click", closeSettingsModal);
+  });
   // 物品属性弹窗：关闭按钮 / 遮罩点击 / Esc
   document.querySelectorAll("[data-close-modal]").forEach((el) => {
     el.addEventListener("click", closeItemModal);
   });
   document.addEventListener("keydown", (ev) => {
-    if (ev.key === "Escape" && !$("#item-modal").classList.contains("hidden")) closeItemModal();
+    if (ev.key !== "Escape") return;
+    if (!$("#item-modal").classList.contains("hidden")) closeItemModal();
+    if (!$("#settings-modal").classList.contains("hidden")) closeSettingsModal();
   });
 
   $("#btn-quests-all").addEventListener("click", () => void completeAllQuests());
@@ -971,7 +1004,7 @@ function bind() {
   // 数字键 1..6 直接切页签（键盘操作比鼠标快，也方便截图核对）
   document.addEventListener("keydown", (ev) => {
     if (ev.target instanceof HTMLInputElement || ev.target instanceof HTMLSelectElement) return;
-    const order = ["char", "skills", "quests", "items", "merc", "settings"];
+    const order = ["char", "skills", "quests", "items", "merc"];
     const n = Number(ev.key);
     if (Number.isInteger(n) && n >= 1 && n <= order.length) activateTab(order[n - 1]);
   });

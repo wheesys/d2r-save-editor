@@ -209,17 +209,39 @@ console.log("=== 6. 页面结构（吸顶靠结构保证，不能靠眼睛看）
   const tabsAt = html.indexOf('id="tabs"');
   check("页签条在 header 内部（吸顶靠结构）", headerStart >= 0 && tabsAt > headerStart && tabsAt < headerEnd,
     `header=${headerStart}..${headerEnd}，tabs=${tabsAt}`);
-  check("每个页签都有 data-tab", (html.match(/data-tab="/g) ?? []).length === 6,
+  // 设置是全局的，不能混在"跟存档有关"的页签里，所以只该有 5 个页签
+  check("页签只有 5 个（设置已移出页签）", (html.match(/data-tab="/g) ?? []).length === 5,
     `实际 ${(html.match(/data-tab="/g) ?? []).length} 个`);
   check(
     "tab 面板与页签一一对应",
-    ["char", "skills", "quests", "items", "merc", "settings"].every((k) => html.includes(`id="tab-${k}"`)),
+    ["char", "skills", "quests", "items", "merc"].every((k) => html.includes(`id="tab-${k}"`)),
     "有页签找不到对应面板",
+  );
+  check("设置改成了工具栏按钮", html.includes('id="btn-settings"'), "缺少设置按钮");
+  check("设置弹窗存在（不再占页签）", html.includes('id="settings-modal"') && !html.includes('id="tab-settings"'));
+  check(
+    "设置弹窗里保留了布局输入项",
+    ["l-inv-cols", "l-inv-rows", "l-cube-cols", "l-cube-rows", "l-stash-cols", "l-stash-rows", "l-merc"].every(
+      (id) => html.includes(`id="${id}"`),
+    ),
+    "有输入项丢失",
   );
   // 角色区块里必须有表单子元素：曾经用 innerHTML 覆盖整块，把这些元素删掉，
   // 渲染时报"缺少元素 #f-level"
   check("角色区块保留了表单子元素", html.includes('id="f-level"') && html.includes('id="f-strength"'));
   check("角色区块有容器存在", html.includes('id="skills"') && html.includes('id="inventory"'));
+
+  // main.ts 里 `$("#xxx")` 引用的元素必须在 index.html 里存在。
+  // 移动/重排区块时最容易漏掉某个 id，而这类问题只在运行时点开对应界面才暴露
+  // （把设置从页签搬到弹窗时就差点漏掉）。
+  const js = readFileSync(new URL("../web/src/main.ts", import.meta.url), "utf8");
+  const referenced = new Set([...js.matchAll(/\$\("#([A-Za-z0-9-]+)"\)/g)].map((m) => m[1]));
+  const absent = [...referenced].filter((id) => !html.includes(`id="${id}"`));
+  check(
+    `main.ts 引用的 ${referenced.size} 个元素都存在`,
+    absent.length === 0,
+    `缺失: ${absent.join(", ")}`,
+  );
 }
 
 console.log("");

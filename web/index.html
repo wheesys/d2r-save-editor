@@ -18,17 +18,18 @@
         <button id="btn-save" disabled>保存</button>
         <button id="btn-reload" disabled>放弃修改</button>
         <span id="dirty" class="badge hidden">有未保存修改</span>
+        <!-- 设置跟具体存档无关，所以放在这一层而不是页签里 -->
+        <button id="btn-settings" class="mini" title="容器尺寸等设置（与存档无关）">⚙ 设置</button>
       </div>
       <div id="dataset" class="muted"></div>
 
-      <!-- 分页：把原来一整条长页面拆成几个页签 -->
+      <!-- 页签只放"跟当前存档有关"的内容；设置已移到上面的按钮 -->
       <nav id="tabs" class="tabs hidden">
         <button class="tab active" data-tab="char">角色</button>
         <button class="tab" data-tab="skills">技能</button>
         <button class="tab" data-tab="quests">任务</button>
         <button class="tab" data-tab="items">物品栏</button>
         <button class="tab" data-tab="merc">佣兵</button>
-        <button class="tab" data-tab="settings">设置</button>
       </nav>
     </header>
 
@@ -130,38 +131,46 @@
           <h2>佣兵</h2>
           <p class="muted">
             佣兵装备读自存档的佣兵段；「佣兵全装备」这类 mod 改动存档里没有标记，
-            所以在「设置」页勾选。
+            所以在工具栏的「⚙ 设置」里勾选。
           </p>
           <div id="merc" class="inventory"></div>
         </section>
       </section>
-
-      <!-- ===== 设置 ===== -->
-      <section id="tab-settings" class="tab-panel hidden">
-        <section id="layout-section" class="card hidden">
-          <h2>容器布局设置</h2>
-          <p class="muted">
-            背包/箱子大小与「佣兵全装备」是 mod 改动，<strong>存档里读不出来</strong>。
-            下面是根据存档坐标推断的结果与需要你确认的项。
-          </p>
-          <div id="layout-questions" class="questions"></div>
-          <div class="grid">
-            <label>背包列数 <input id="l-inv-cols" type="number" min="1" max="64" /></label>
-            <label>背包行数 <input id="l-inv-rows" type="number" min="1" max="64" /></label>
-            <label>合成箱列数 <input id="l-cube-cols" type="number" min="1" max="64" /></label>
-            <label>合成箱行数 <input id="l-cube-rows" type="number" min="1" max="64" /></label>
-            <label>箱子列数 <input id="l-stash-cols" type="number" min="1" max="64" /></label>
-            <label>箱子行数 <input id="l-stash-rows" type="number" min="1" max="64" /></label>
-            <label class="inline"><input type="checkbox" id="l-merc" /> 佣兵全装备（mod）</label>
-          </div>
-          <div class="actions">
-            <button id="btn-apply-layout" class="primary">确认并应用布局</button>
-            <button id="btn-check-bounds">按此布局检查越界</button>
-          </div>
-          <div id="bounds-result" class="muted"></div>
-        </section>
-      </section>
     </main>
+
+    <!--
+      容器布局设置弹窗。
+      设置是**全局**的（同一台机器上的 mod 尺寸一致），跟具体存档无关，
+      所以不放在页签里，而是从工具栏的「⚙ 设置」按钮打开。
+    -->
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-backdrop" data-close-settings></div>
+      <div class="modal-body">
+        <div class="modal-head">
+          <h2>容器布局设置</h2>
+          <button id="btn-close-settings" class="mini" data-close-settings>关闭 ✕</button>
+        </div>
+        <p class="muted">
+          背包/箱子大小与「佣兵全装备」是 mod 改动，<strong>存档里读不出来</strong>。
+          这些设置与存档无关，改一次会记住（下次启动自动带上）。
+        </p>
+        <div id="layout-questions" class="questions"></div>
+        <div class="grid">
+          <label>背包列数 <input id="l-inv-cols" type="number" min="1" max="64" /></label>
+          <label>背包行数 <input id="l-inv-rows" type="number" min="1" max="64" /></label>
+          <label>合成箱列数 <input id="l-cube-cols" type="number" min="1" max="64" /></label>
+          <label>合成箱行数 <input id="l-cube-rows" type="number" min="1" max="64" /></label>
+          <label>箱子列数 <input id="l-stash-cols" type="number" min="1" max="64" /></label>
+          <label>箱子行数 <input id="l-stash-rows" type="number" min="1" max="64" /></label>
+          <label class="inline"><input type="checkbox" id="l-merc" /> 佣兵全装备（mod）</label>
+        </div>
+        <div class="actions">
+          <button id="btn-apply-layout" class="primary">确认并应用布局</button>
+          <button id="btn-check-bounds">按此布局检查越界</button>
+        </div>
+        <div id="bounds-result" class="muted"></div>
+      </div>
+    </div>
 
     <!-- 物品属性弹窗：点物品块/行时打开，不再往页面下面堆内容 -->
     <div id="item-modal" class="modal hidden">
