@@ -6,18 +6,58 @@
 use d2r_core::items::ItemTarget;
 use d2r_core::{EditSession, ItemEdit, SaveFile};
 
-fn work(tag: &str) -> std::path::PathBuf {
+/// 找一个可用的样本存档；**没有样本时返回 `None` 让测试跳过**。
+///
+/// 这些测试需要真实存档，而样本文件**不入库**（见 `.gitignore`），
+/// 所以 CI 上一定没有。逐个测试都做跳过判断，不要在 `copy().unwrap()`
+/// 上 panic——那会让整个 CI 红掉，而实际代码并没有问题。
+///
+/// 优先用 `D2R_SAMPLES_DIR`，其次在仓库的 `samples/saves/` 里挑一个存在的。
+fn sample_save() -> Option<std::path::PathBuf> {
+    let candidates = |dir: &std::path::Path| -> Vec<std::path::PathBuf> {
+        ["杜仲.d2s", "小五.d2s", "杜老五.d2s", "杜老二.d2s"]
+            .iter()
+            .map(|n| dir.join("d2r-105").join(n))
+            .collect()
+    };
+    if let Ok(dir) = std::env::var("D2R_SAMPLES_DIR") {
+        if let Some(p) = candidates(std::path::Path::new(&dir))
+            .into_iter()
+            .find(|p| p.is_file())
+        {
+            return Some(p);
+        }
+    }
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap();
+        .parent()?
+        .parent()?;
+    candidates(&repo.join("samples").join("saves"))
+        .into_iter()
+        .find(|p| p.is_file())
+}
+
+/// 复制样本到可写目录；没有样本时返回 `None`。
+fn work(tag: &str) -> Option<std::path::PathBuf> {
+    let src = sample_save()?;
     let mut dir = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     dir.push("sockets");
     let _ = std::fs::create_dir_all(&dir);
     let dest = dir.join(format!("{tag}.d2s"));
-    std::fs::copy(repo.join("samples/saves/d2r-105/杜仲.d2s"), &dest).unwrap();
-    dest
+    std::fs::copy(&src, &dest).ok()?;
+    Some(dest)
+}
+
+/// 跳过测试时统一打印一句，方便在日志里看出"不是失败，是没样本"。
+macro_rules! skip_without_sample {
+    ($tag:expr) => {
+        match work($tag) {
+            Some(p) => p,
+            None => {
+                eprintln!("跳过：没有样本存档（样本不入库，CI 上属正常）");
+                return;
+            }
+        }
+    };
 }
 
 fn assert_self_consistent(path: &std::path::Path, tag: &str) {
@@ -44,7 +84,7 @@ fn assert_self_consistent(path: &std::path::Path, tag: &str) {
 
 #[test]
 fn socket_change_produces_valid_file() {
-    let path = work("valid");
+    let path = skip_without_sample!("valid");
     let mut s = EditSession::open(&path).unwrap();
     let before = s.mercenary_items()[0].socket_count;
     s.apply_item_on(
@@ -70,7 +110,7 @@ fn socket_change_produces_valid_file() {
 
 #[test]
 fn socket_change_on_inventory_produces_valid_file() {
-    let path = work("valid_inv");
+    let path = skip_without_sample!("valid_inv");
     let mut s = EditSession::open(&path).unwrap();
     let idx = s
         .item_details()
@@ -95,7 +135,7 @@ fn socket_change_on_inventory_produces_valid_file() {
 fn non_structural_edit_keeps_file_length() {
     // 对照：改耐久不改长度，所以长度必须一字不差（长度一变说明写路径有噪声）。
     // 注意这里**不**断言逐字节一致——内容改了，校验和必然跟着变。
-    let path = work("identity");
+    let path = skip_without_sample!("identity");
     let mut s = EditSession::open(&path).unwrap();
     s.apply_item(ItemEdit::SetDurability { index: 0, value: 1 })
         .unwrap();
