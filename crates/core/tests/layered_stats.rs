@@ -251,3 +251,63 @@ fn target_defaults_to_inventory() {
         "默认目标应是主物品列表"
     );
 }
+
+/// **添加属性**必须能新增一个物品上原本没有的 `ID + 层`。
+///
+/// 用户实测：在空白护符上加"职业技能等级（德鲁伊层 6）"被拒绝，
+/// 报"该物品没有属性 ID 83（层 6）"。根因是"添加"走了 `SetStat`，
+/// 而 `SetStat` 带层时找不到就报错（那是给"改已有值"用的语义）。
+#[test]
+fn add_stat_creates_a_missing_layer() {
+    let Some((src, index, _, _)) = sample_with_layered_stat() else {
+        eprintln!("跳过：样本里没有带层的属性");
+        return;
+    };
+    let work = work_copy(&src, "add_layer");
+    let mut session = EditSession::open(&work).expect("打开");
+    // 先看这件物品现在有哪些 `ID + 层`
+    let existing = session
+        .item_detail(index)
+        .expect("读明细")
+        .stats
+        .iter()
+        .map(|(id, _, layer)| (*id, *layer))
+        .collect::<Vec<_>>();
+    let (stat, layer) = (83u16, 6i32); // item_addclassskills / 德鲁伊
+    if existing.contains(&(stat, layer)) {
+        eprintln!("跳过：样本第 0 件已经有该属性");
+        return;
+    }
+    session
+        .apply_item(ItemEdit::AddStat {
+            index,
+            stat,
+            value: 1,
+            layer: Some(layer),
+        })
+        .expect("添加属性应成功（即使原本没有）");
+    let after = session.item_detail(index).expect("读明细");
+    assert!(
+        after
+            .stats
+            .iter()
+            .any(|(id, _, l)| *id == stat && *l == layer),
+        "新属性应出现在物品上"
+    );
+    // 再添加一次同一层：应覆盖而不是加出两条
+    session
+        .apply_item(ItemEdit::AddStat {
+            index,
+            stat,
+            value: 2,
+            layer: Some(layer),
+        })
+        .expect("重复添加应覆盖");
+    let again = session.item_detail(index).expect("读明细");
+    let hits = again
+        .stats
+        .iter()
+        .filter(|(id, _, l)| *id == stat && *l == layer)
+        .count();
+    assert_eq!(hits, 1, "同一 ID+层 只应有一条");
+}

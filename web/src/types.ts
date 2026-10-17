@@ -56,6 +56,8 @@ export interface ItemDto {
   // 后端这些字段是 camelCase 序列化的（DTO 上是 snake_case），
   // 早期这里跟着 Rust 字段名写成了 snake_case，导致界面上取到 undefined。
   nameResolved: boolean;
+  /** 自定义名字（personalized，空表示没有） */
+  personalizedName: string;
   quality: string;
   level: number;
   mode: string;
@@ -124,6 +126,8 @@ export type ItemEdit =
   | { kind: "setDefense"; index: number; value: number }
   | { kind: "setSockets"; index: number; count: number }
   | { kind: "setStat"; index: number; stat: number; value: number; layer?: number }
+  | { kind: "addStat"; index: number; stat: number; value: number; layer?: number }
+  | { kind: "relayerStat"; index: number; stat: number; from: number; to: number }
   | { kind: "removeStat"; index: number; stat: number }
   | { kind: "moveTo"; index: number; col: number; row: number }
   | { kind: "remove"; index: number };
@@ -283,6 +287,8 @@ export interface LibraryItemDto {
   code: string;
   quality: string;
   group: string;
+  /** 所属套装名（暗金为空） */
+  setName: string;
   requiredLevel: number;
   width: number;
   height: number;

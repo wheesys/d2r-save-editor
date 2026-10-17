@@ -150,42 +150,59 @@ impl StatLimit {
         value as f64 / divisor
     }
 
-    /// 界面上的值 = **存档里的值本身**。
+    /// 界面上的值：**换算回游戏里看到的数**。
     ///
-    /// 用户决定（2026-10）：**不做游戏显示值换算**，直接按数据大小处理，
-    /// 只把每条属性的有效范围说明清楚。原因是各属性的处理方式不同
-    /// （`ItemStatCost` 里还有 `Encode` / `Add` / `Multiply` 这些列，
-    /// 没有可靠的公开定义），与其猜错，不如把原始数据如实呈现。
+    /// 带 `ValShift` 的属性（如 `maxhp` 的 8）在存档里按 1/256 精度存：
+    /// 500 点生命存成 128000。直接显示原始值会大 256 倍，所以要除回去。
+    /// `ValShift == 0` 的属性（绝大多数物品属性）不受影响。
+    ///
+    /// 其它列（`Encode` / `Add` / `Multiply`）仍不做换算，原因见 `display_range`。
     pub fn to_user(&self, stored: i64) -> f64 {
-        stored as f64
+        (stored >> self.val_shift.min(62)) as f64
     }
 
-    /// [`Self::to_user`] 的逆运算：界面值就是存档值。
+    /// [`Self::to_user`] 的逆运算：把界面上的数写回存档。
     pub fn to_stored(&self, display: f64) -> i64 {
-        display.round() as i64
+        let shift = self.val_shift.min(62);
+        if shift == 0 {
+            display.round() as i64
+        } else {
+            (display.round() as i64) << shift
+        }
     }
 
-    /// 界面上给用户看的数：就是存档里的值。
+    /// 与 [`Self::to_user`] 同义（历史命名，保留以便调用点读起来更直白）。
     pub fn display_value(&self, stored: i64) -> f64 {
-        stored as f64
+        self.to_user(stored)
     }
 
-    /// [`Self::display_value`] 的逆运算。
+    /// 与 [`Self::to_stored`] 同义。
     pub fn stored_from_display(&self, display: f64) -> i64 {
-        display.round() as i64
+        self.to_stored(display)
     }
 
     /// 界面上的有效范围 = **存档里的有效范围**。
+    /// 界面显示的有效范围（与 [`Self::display_value`] 同一量纲）。
     pub fn display_range(&self) -> (f64, f64) {
-        (self.min() as f64, self.max() as f64)
+        let lo = self.raw_min();
+        // `raw_min` 是"位数下界 - SaveAdd"，已扣掉偏移；再按精度换回游戏值
+        let hi = self.raw_max();
+        (lo as f64, hi as f64)
     }
 
     /// 界面输入框的最小变化量。
     ///
     /// 带移位（`ValShift`）的属性在存档里按 `2^ValShift` 的精度存，
     /// 值必须是它的倍数，所以界面步长就是 [`Self::step`]。
+    /// 界面上的最小步长：换算到游戏值后恒为 1。
+    ///
+    /// （存档里的步长是 `2^ValShift`，除掉精度之后就是 1）
     pub fn user_step(&self) -> f64 {
-        self.step() as f64
+        if self.val_shift > 0 {
+            1.0
+        } else {
+            self.step() as f64
+        }
     }
 }
 
@@ -455,31 +472,40 @@ mod tests {
         assert!(limits.check(9999, i64::MAX).is_ok());
     }
 
-    /// **按数据大小处理**：界面显示/编辑的值就是存档里的值本身。
+    /// 界面显示的是**游戏里的值**：`ValShift = 0` 时与存档值相同，
+    /// `ValShift > 0` 时要把存储精度除回去（否则 `maxhp` 会大 256 倍）。
     ///
-    /// 用户决定（2026-10）：不做游戏显示值换算（各属性处理方式不同，
-    /// `ItemStatCost` 里还有 `Encode` / `Add` / `Multiply` 没有可靠公开定义），
-    /// 只把每条属性的**有效范围**说明清楚。
+    /// 用户决定（2026-10）变更：原先直接显示存档原始值，结果生命值显示成
+    /// 128000 这种数字；现在按 `ValShift` 换算成游戏里看到的数。
+    /// 其它列（`Encode` / `Add` / `Multiply`）仍不换算。
     #[test]
-    fn display_is_the_stored_value_itself() {
+    fn display_matches_game_value() {
         for (id, bits, add, vs) in [
             (76u16, 6u8, 10u32, 0u8), // item_maxhp_percent
             (96, 7, 20, 0),           // item_fastermovevelocity
             (127, 3, 0, 0),           // item_allskills
-            (7, 9, 32, 8),            // maxhp
         ] {
             let l = limit(id, bits, add, vs);
-            // 往返恒等：界面值 == 存档值
-            for v in [l.min(), 0, 1, l.max()] {
-                assert_eq!(l.display_value(v), v as f64, "ID {id} 显示值应等于存档值");
+            // 没有 ValShift 的属性：界面值 == 存档值
+            for v in [l.raw_min(), 0, 1, l.raw_max()] {
+                assert_eq!(
+                    l.display_value(v),
+                    v as f64,
+                    "ID {id} 无 ValShift 应原样显示"
+                );
                 assert_eq!(l.stored_from_display(v as f64), v, "ID {id} 往返应恒等");
             }
         }
+
+        // maxhp：9 位、SaveAdd 32、ValShift 8 → 500 点生命存成 128000
+        let hp = limit(7, 9, 32, 8);
+        assert_eq!(hp.display_value(128_000), 500.0);
+        assert_eq!(hp.stored_from_display(500.0), 128_000);
     }
 
-    /// 范围按**存档值**给出（位宽 + 偏移 + 移位算出来的那个区间）。
+    /// 范围按**存档位宽**算出，但换算到游戏值后给出。
     #[test]
-    fn range_is_in_stored_units() {
+    fn range_is_in_game_units() {
         // item_maxhp_percent：6 位、SaveAdd 10 → -10..53
         let hpp = limit(76, 6, 10, 0);
         assert_eq!(hpp.range_text(), "-10–53");
@@ -487,10 +513,11 @@ mod tests {
         assert_eq!(limit(127, 3, 0, 0).range_text(), "0–7");
         // item_fastermovevelocity：7 位、SaveAdd 20 → -20..107
         assert_eq!(limit(96, 7, 20, 0).range_text(), "-20–107");
-        // maxhp：9 位、SaveAdd 32、ValShift 8 → 步长 256，区间 256..122624
+        // maxhp：9 位、SaveAdd 32、ValShift 8
+        // 位数下界 0 - 32 = -32，上界 511 - 32 = 479（都是游戏值）
         let hp = limit(7, 9, 32, 8);
-        assert_eq!(hp.range_text(), "256–122624");
-        assert_eq!(hp.user_step(), 256.0, "取值须是 256 的倍数");
+        assert_eq!(hp.range_text(), "-32–479");
+        assert_eq!(hp.user_step(), 1.0, "换算到游戏值后步长是 1");
     }
 
     /// 按等级加成的属性：**编辑的仍是存档值**，per_level_rate 只用于说明。
@@ -505,13 +532,13 @@ mod tests {
         // 说明用的"每级"是 61/8 = 7.625（游戏内按 值×等级/8 生效）
         assert_eq!(format_rate(strl.per_level_rate(61)), "7.625");
 
-        // 同时带移位（SaveAdd 0、ValShift 8）：存档值 16128，步长 256
+        // 同时带移位（SaveAdd 0、ValShift 8）：存档值 16128 是每级系数 63 × 256
         let mut hpl = limit(216, 6, 0, 8);
         hpl.per_level = true;
         hpl.op_param = 3;
-        assert_eq!(hpl.display_value(16128), 16128.0, "按数据大小处理");
-        assert_eq!(hpl.stored_from_display(16128.0), 16128);
-        assert_eq!(hpl.user_step(), 256.0);
+        assert_eq!(hpl.display_value(16128), 63.0, "除回存储精度后是系数 63");
+        assert_eq!(hpl.stored_from_display(63.0), 16128);
+        assert_eq!(hpl.user_step(), 1.0);
     }
     /// 参数位是**另算一段位**的，所以值仍按位宽判，只给提示。
     #[test]
@@ -558,18 +585,18 @@ mod tests {
         assert_eq!((strl.per_level_rate(61) * 52.0) as i64, 396);
 
         // **同时带移位与按等级加成**（item_hp_perlevel：op param 3 + ValShift 8）
-        // 按数据大小处理：编辑的就是存档里的 16128（步长 256）。
-        // 说明用的"每级"= 16128 / 256 / 8 = 7.875（先按精度还原再除以 8）。
+        // 存档里的 16128 按精度换算后是系数 63（16128 / 256），
+        // 界面上编辑的就是这个 63；写回时再乘回 256。
         let mut hpl = limit(216, 6, 0, 8);
         hpl.per_level = true;
         hpl.op_param = 3;
-        assert_eq!(hpl.display_value(16128), 16128.0, "编辑值=存档值");
-        assert_eq!(hpl.stored_from_display(16128.0), 16128);
-        assert_eq!(hpl.user_step(), 256.0, "取值须是 256 的倍数");
+        assert_eq!(hpl.display_value(16128), 63.0, "除回精度后是系数 63");
+        assert_eq!(hpl.stored_from_display(63.0), 16128);
+        assert_eq!(hpl.user_step(), 1.0);
         assert_eq!(
-            format_rate(hpl.per_level_rate(16128 / 256)),
+            format_rate(hpl.per_level_rate(63)),
             "7.875",
-            "说明用的每级 = (16128/256)/8"
+            "说明用的每级 = 63/8"
         );
 
         // 命中类属性是 op param = 1（每级 1 点需要 2 点值）
@@ -578,5 +605,49 @@ mod tests {
         ar.op_param = 1;
         assert_eq!(ar.per_level_rate(10), 5.0, "10/2");
         assert_eq!(format_rate(ar.per_level_rate(10)), "5", "整数不带小数点");
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+
+    /// 带 `ValShift` 的属性：存档值按 1/256 精度存，界面要换算回游戏值。
+    #[test]
+    fn val_shift_is_removed_for_display() {
+        // maxhp：SaveBits 9、SaveAdd 32、ValShift 8
+        let limit = StatLimit {
+            id: 7,
+            save_bits: 9,
+            save_add: 32,
+            has_param_bits: false,
+            has_encoding: false,
+            per_level: false,
+            op_param: 0,
+            val_shift: 8,
+        };
+        // 500 点生命在存档里是 500 * 256 = 128000
+        assert_eq!(limit.display_value(128_000), 500.0);
+        assert_eq!(limit.display_value(0), 0.0);
+        // 范围与步长也要在同一量纲：位数下界 0 - 32 = -32
+        assert_eq!(limit.display_range(), (-32.0, 479.0));
+        assert_eq!(limit.user_step(), 1.0);
+    }
+
+    /// `ValShift = 0` 的属性保持原值（绝大多数物品属性）。
+    #[test]
+    fn no_val_shift_is_unchanged() {
+        let limit = StatLimit {
+            id: 0,
+            save_bits: 8,
+            save_add: 0,
+            has_param_bits: false,
+            has_encoding: false,
+            per_level: false,
+            op_param: 0,
+            val_shift: 0,
+        };
+        assert_eq!(limit.display_value(42), 42.0);
+        assert_eq!(limit.user_step(), 1.0);
     }
 }

@@ -59,6 +59,45 @@ pub struct StatNamer {
     by_id: BTreeMap<u16, StatName>,
 }
 
+/// 描述串解析不出来的基础属性，用这张表给中文名。
+///
+/// 只列**玩家基础属性**：它们的 `descstrpos` 指向通用模板（如 `ModStr1u`），
+/// 解析结果是空或可读性差；物品属性走正常解析，不在这里覆盖。
+fn manual_display(internal: &str) -> Option<&'static str> {
+    Some(match internal {
+        "maxhp" => "最大生命",
+        "maxmana" => "最大法力",
+        "hp" => "生命",
+        "mana" => "法力",
+        "stamina" => "体力",
+        "maxstamina" => "最大体力",
+        "level" => "等级",
+        "experience" => "经验值",
+        "gold" => "金币",
+        "goldbank" => "储物箱金币",
+        "strength" => "力量",
+        "dexterity" => "敏捷",
+        "vitality" => "活力",
+        "energy" => "能量",
+        // 技能类属性：描述串是 "+%d to %s" 这种模板，直接抽会抽出"至"这种残字
+        // （用户看到属性名就一个"至"）。这里给完整名字，顺便把几种加技能等级
+        // 的属性区分开——它们的层含义不同，混在一起选容易选错。
+        "item_addclassskills" => "职业技能等级",
+        "item_singleskill" => "指定技能等级（限定职业）",
+        "item_nonclassskill" => "指定技能等级（不限职业）",
+        "item_charged_skill" => "聚气技能",
+        "item_addskill_tab" => "指定技能页等级",
+        "item_aura" => "装备时获得光环",
+        "item_skillonattack" => "攻击时施放技能",
+        "item_skillonkill" => "杀死敌人时施放技能",
+        "item_skillondeath" => "死亡时施放技能",
+        "item_skillonhit" => "击中时施放技能",
+        "item_skillongethit" => "被击中时施放技能",
+        "item_skillonlevelup" => "升级时施放技能",
+        _ => return None,
+    })
+}
+
 impl StatNamer {
     /// 从 `ItemStatCost` 表与文本表构建。
     pub fn new(table: &Table, strings: &Strings) -> Self {
@@ -89,6 +128,27 @@ impl StatNamer {
                 }
             } else {
                 (internal.clone(), false)
+            };
+            // 少数基础属性的描述串解析不出来（`maxhp` 的 `descstrpos` 是
+            // `ModStr1u` 这类通用模板），界面只能看到内部名。这里补一张小表，
+            // 只覆盖**玩家基础属性**，不动物品属性。
+            let (display, resolved) = match manual_display(&internal) {
+                Some(label) => (label.to_string(), true),
+                None => (display, resolved),
+            };
+            // 按等级加成的属性（`per level` 非 0），名字后面标一句：
+            // 这类值不是"加多少"，而是"每级加多少"，不加说明容易看错。
+            // 与 `StatLimit::per_level` 用同一判据（内部名以 `perlevel` 结尾），
+            // 两边不一致会出现"说明里写按等级、名字上却不标"的矛盾。
+            let per_level_col = if internal.to_ascii_lowercase().ends_with("perlevel") {
+                1
+            } else {
+                0
+            };
+            let (display, resolved) = if per_level_col != 0 {
+                (format!("{display}（按等级）"), true)
+            } else {
+                (display, resolved)
             };
             let shift = table.int(r, "ValShift").unwrap_or(0).clamp(0, 31) as u32;
             // 游戏会为它生成描述，且描述串确实解析出了名字 → 值得让用户改
@@ -302,4 +362,25 @@ mod tests {
         assert_eq!(namer.display_or_id(4242), "属性#4242");
         assert_eq!(namer.step_of(4242), 1);
     }
+}
+
+/// 技能类属性的名字**不能靠描述串解析**：那些模板是 "+%d to %s"，
+/// 洗掉占位符只剩连接词（用户看到属性名就一个"至"）。
+#[test]
+fn skill_stat_names_are_readable() {
+    for (internal, expect) in [
+        ("item_addclassskills", "职业技能等级"),
+        ("item_singleskill", "指定技能等级（限定职业）"),
+        ("item_nonclassskill", "指定技能等级（不限职业）"),
+        ("item_charged_skill", "聚气技能"),
+        ("item_aura", "装备时获得光环"),
+    ] {
+        assert_eq!(
+            manual_display(internal),
+            Some(expect),
+            "{internal} 应有固定可读名"
+        );
+    }
+    // 普通物品属性不走这张表，避免覆盖正常解析结果
+    assert_eq!(manual_display("item_maxhp_percent"), None);
 }

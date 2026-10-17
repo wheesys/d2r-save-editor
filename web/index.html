@@ -20,6 +20,8 @@
         <span id="dirty" class="badge hidden">有未保存修改</span>
         <!-- 设置跟具体存档无关，所以放在这一层而不是页签里 -->
         <button id="btn-settings" class="mini" title="容器尺寸等设置（与存档无关）">⚙ 设置</button>
+        <!-- 版本号：右上角常显，便于确认自己跑的是哪一版 -->
+        <span id="app-version" class="muted version-tag"></span>
       </div>
       <div id="dataset" class="muted"></div>
 
@@ -186,6 +188,12 @@
           <button id="btn-check-bounds">按此布局检查越界</button>
         </div>
         <div id="bounds-result" class="muted"></div>
+
+        <!-- 更新：直接打开项目的 Release 页，不在这里做联网检查 -->
+        <div class="actions">
+          <button id="btn-check-update">检查更新（打开 GitHub Releases）</button>
+          <span id="settings-version" class="muted"></span>
+        </div>
       </div>
     </div>
 
@@ -240,6 +248,26 @@
 
     <div id="toast" class="toast hidden"></div>
     <script type="module" src="/src/main.ts"></script>
+  <!-- 重命名弹窗：写 personalized 字段，游戏显示为"名字's 底材名" -->
+  <div id="rename-modal" class="modal hidden">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2>给物品起名字</h2>
+        <button data-close-rename>关闭 ✕</button>
+      </div>
+      <p class="muted">
+        游戏里会显示成「<span id="rename-preview">名字</span>'s 底材名」——
+        这是游戏唯一支持自定义文字的位置。留空则清除命名。
+      </p>
+      <div class="add-stat">
+        <input id="rename-input" type="text" maxlength="15" placeholder="最多 15 个字符" />
+      </div>
+      <div class="actions">
+        <button id="btn-rename-ok" class="primary">确定</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 右键菜单：物品 / 空白处 -->
   <div id="item-menu" class="ctx-menu hidden"></div>
 
@@ -256,10 +284,8 @@
         <span id="lib-count" class="muted"></span>
       </div>
       <div id="lib-items" class="lib-items"></div>
+      <!-- 点条目即直接放入物品栏，不需要"导入这件"按钮 -->
       <div id="lib-detail" class="muted"></div>
-      <div class="actions">
-        <button id="btn-lib-import" class="primary" disabled>导入这件</button>
-      </div>
     </div>
   </div>
 

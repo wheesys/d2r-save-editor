@@ -8,7 +8,8 @@ import {
   renderMercDoll,
   setItemIcons,
 } from "./inventory";
-import { STAT_TABLE_HEAD, renderStatRow, statValueText } from "./statrow";
+import { STAT_TABLE_HEAD, renderLayerControl, renderStatRow, statValueText } from "./statrow";
+import type { LayerOption } from "./statrow";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 
 import {
@@ -576,7 +577,7 @@ async function addStatNow() {
   try {
     // 直接把这条属性应用到物品上（后端会校验并读回比对）
     await call<number>("apply_item_edits", {
-      edits: [{ kind: "setStat", index: selectedItem, stat: id, value, layer }],
+      edits: [{ kind: "addStat", index: selectedItem, stat: id, value, layer }],
       target: selectedTarget,
     });
     toast(`已添加：${name} = ${value}。点「保存」才写入文件。`);
@@ -632,7 +633,7 @@ function showAddStatHint() {
  *
  * `paramOptions` 由后端给出（如 `item_addclassskills` 列出各职业）。
  */
-function paramOptionsOf(id: number): { layer: number; label: string }[] {
+function paramOptionsOf(id: number): LayerOption[] {
   return statCatalog.find((s) => s.id === id)?.paramOptions ?? [];
 }
 
@@ -650,13 +651,13 @@ function renderAddStatValue2(id: number) {
     slot.innerHTML = "";
     return;
   }
-  const options = paramOptionsOf(id);
-  slot.innerHTML =
-    options.length > 0
-      ? `<select id="add-stat-value2-sel" title="值2（参数）">${options
-          .map((o) => `<option value="${o.layer}">${escapeHtml(o.label)}</option>`)
-          .join("")}</select>`
-      : `<input id="add-stat-value2" type="text" inputmode="numeric" value="0" title="值2（参数）" />`;
+  // 与属性表里的"值2"用同一个控件：技能类属性会是**两级选单**（职业 → 技能）
+  slot.innerHTML = renderLayerControl(
+    id,
+    0,
+    paramOptionsOf(id),
+    `id="add-stat-value2-sel" class="cell-select" title="值2（参数）"`,
+  );
   // 注意：新增属性的值2 **不用** `data-stat-layer-sel`，
   // 那个属性名属于属性表里的行；共用会被 collectDetailEdits 误当成行改动。
 }
@@ -784,7 +785,14 @@ function bindStatRowAutoApply() {
     .forEach((el) => {
       const stat = Number(el.dataset.statLayerSel);
       const layer = Number(el.dataset.statLayerCur);
-      el.addEventListener("change", () => void applyRowNow(stat, layer));
+      // 值2 换了选项 = 换了一条属性（层是属性语义的一部分）。
+      // 这里必须发"换层"，不能发"改值"：改值找不到该层会直接被拒
+      // （用户实测："该物品没有属性 ID 97（层 58）"）。
+      el.addEventListener("change", () => {
+        const to = Number((el as HTMLSelectElement).value);
+        if (!Number.isFinite(to) || to === layer) return;
+        void relayerStatNow(stat, layer, to);
+      });
     });
   // 值2 直接输入的场合（没有可选列表）：失焦时同样按整行提交
   $("#item-stats")
@@ -1389,11 +1397,43 @@ function bind() {
 
   $("#btn-quests-all").addEventListener("click", () => void completeAllQuests());
 
+  // 值2 是两级选单时：切换第一级（分组/职业）就重建第二级的选项。
+  // 只重建 DOM，不派发 change，所以不会误触发"应用修改"。
+  document.addEventListener("change", (ev) => {
+    const el = ev.target as HTMLElement | null;
+    if (!el?.classList.contains("layer-group-sel")) return;
+    const id = Number(el.dataset.layerFor ?? "0");
+    const group = (el as HTMLSelectElement).value;
+    const options = (id > 0 ? paramOptionsOf(id) : []).filter(
+      (o) => (o.group ?? "") === group,
+    );
+    const pair = el.closest(".layer-pair");
+    const skillSel = pair?.querySelector<HTMLSelectElement>(
+      "select[data-stat-layer-sel], #add-stat-value2-sel",
+    );
+    if (!skillSel) return;
+    skillSel.innerHTML = options
+      .map((o) => `<option value="${o.layer}">${escapeHtml(o.label)}</option>`)
+      .join("");
+  });
+
+  // 版本号 + 检查更新
+  void setupVersionAndUpdate();
+
+  // 弹窗打开时锁住背景滚动
+  watchModalScrollLock();
+
+  // 重命名弹窗
+  $("#btn-rename-ok").addEventListener("click", () => void applyRename());
+  $("#rename-input").addEventListener("input", updateRenamePreview);
+  document.querySelectorAll("[data-close-rename]").forEach((el) => {
+    el.addEventListener("click", () => $("#rename-modal").classList.add("hidden"));
+  });
+
   // 导出整栏物品
   $("#btn-export-all-items").addEventListener("click", () => void exportAllItems());
 
-  // 装备库导入弹窗（搜索 / 类型筛选 / 导入 / 关闭）
-  $("#btn-lib-import").addEventListener("click", () => void importLibraryNow());
+  // 装备库弹窗（搜索 / 类型筛选 / 关闭）——点条目即导入，无需确认按钮
   $("#lib-search").addEventListener("input", renderLibraryItems);
   $("#lib-group").addEventListener("change", renderLibraryItems);
   document.querySelectorAll("[data-close-lib]").forEach((el) => {
@@ -1579,6 +1619,13 @@ type ItemMenuTarget =
 let menuTarget: ItemMenuTarget | null = null;
 let libraryItems: LibraryItemDto[] = [];
 let librarySelected: string | null = null;
+/**
+ * 已展开的分组键集合（任意层级）。
+ *
+ * 装备库是三层树（绿装/暗金 → 套装名/类型 → 物品），
+ * 默认**全部收起**；点组头展开，再点收起。
+ */
+const expandedGroups = new Set<string>();
 
 /** 关掉右键菜单（点别处、按 Esc 之外的任何操作都会关）。 */
 function hideItemMenu() {
@@ -1600,6 +1647,8 @@ function showItemMenu(target: ItemMenuTarget, x: number, y: number) {
           { label: "编辑属性", action: () => void selectItem(target.index) },
           { label: "复制这件", action: () => void duplicateItemNow(target.index) },
           { label: "导出这件…", action: () => void exportItemNow(target.index) },
+          { label: "重命名…", action: () => openRename(target.index) },
+          { label: "删除这件", action: () => void deleteItemNow(target.index) },
           { label: "从装备库导入…", action: () => void openLibrary() },
           { label: "从文件导入…", action: () => void importFromFile() },
         ]
@@ -1662,14 +1711,40 @@ async function openLibrary() {
   renderLibraryItems();
 }
 
-/** 填"按类型筛选"下拉：品质·分组。 */
+/** 装备库条目的显示品质：套装在界面上叫"绿装"。 */
+function qualityLabelOf(it: LibraryItemDto): string {
+  return it.quality === "套装" ? "绿装" : it.quality;
+}
+
+/**
+ * 装备库的层级：**绿装/暗金 → （套装名 / 物品类型）→ 物品**。
+ *
+ * 每一层都可折叠，默认全部收起——一打开就把几百件铺开会没有重点。
+ * 返回从根到该条目路径上每一层的键，供展开状态按路径记录。
+ */
+function libraryPathOf(it: LibraryItemDto): { level1: string; level2: string } {
+  const level1 = qualityLabelOf(it);
+  const level2 =
+    it.quality === "套装" && it.setName !== "" ? it.setName : it.group;
+  return { level1, level2 };
+}
+
+/** 展开状态的键：用 `层级|名字` 拼，避免不同层同名互相影响。 */
+function groupKey(level1: string, level2?: string): string {
+  return level2 === undefined ? `L1|${level1}` : `L2|${level1}|${level2}`;
+}
+
+/** 填"按类型筛选"下拉：按第一层（绿装/暗金）与第二层组合。 */
 function fillLibraryGroups() {
   const groups = new Set<string>();
-  for (const it of libraryItems) groups.add(`${it.quality}·${it.group}`);
+  for (const it of libraryItems) {
+    const { level1, level2 } = libraryPathOf(it);
+    groups.add(`${level1}·${level2}`);
+  }
   const sel = $("#lib-group") as HTMLSelectElement;
   const previous = sel.value;
   sel.innerHTML =
-    `<option value="">全部类型</option>` +
+    `<option value="">全部</option>` +
     [...groups]
       .sort()
       .map((g) => `<option value="${escapeAttr(g)}">${escapeHtml(g)}</option>`)
@@ -1677,41 +1752,88 @@ function fillLibraryGroups() {
   if ([...groups].includes(previous)) sel.value = previous;
 }
 
-/** 按筛选条件渲染条目列表。 */
+/** 渲染装备库：三层树（绿装/暗金 → 套装名/类型 → 物品）。 */
 function renderLibraryItems() {
   const keyword = ($("#lib-search") as HTMLInputElement).value.trim().toLowerCase();
-  const group = ($("#lib-group") as HTMLSelectElement).value;
+  const filter = ($("#lib-group") as HTMLSelectElement).value;
   const matched = libraryItems.filter((it) => {
-    if (group && `${it.quality}·${it.group}` !== group) return false;
+    const { level1, level2 } = libraryPathOf(it);
+    if (filter && `${level1}·${level2}` !== filter) return false;
     if (keyword === "") return true;
     return it.name.toLowerCase().includes(keyword) || it.code.includes(keyword);
   });
   $("#lib-count").textContent = `${matched.length} / ${libraryItems.length} 件`;
-  $("#lib-items").innerHTML = matched
-    .map(
-      (it) =>
-        `<button class="lib-item${it.id === librarySelected ? " selected" : ""}" data-lib="${escapeAttr(it.id)}">
-           <span class="lib-name">${escapeHtml(it.name)}</span>
-           <span class="lib-meta">${it.width}×${it.height}｜需${it.requiredLevel}级｜${it.stats.length} 条属性</span>
-         </button>`,
-    )
-    .join("");
+
+  // 搜索时忽略折叠状态：否则打完关键字只看到一串收起的组头。
+  const searching = keyword !== "" || filter !== "";
+  const isOpen = (key: string) => searching || expandedGroups.has(key);
+
+  // 按 第一层 → 第二层 建树，保持数据本身的顺序
+  const tree = new Map<string, Map<string, LibraryItemDto[]>>();
+  for (const it of matched) {
+    const { level1, level2 } = libraryPathOf(it);
+    if (!tree.has(level1)) tree.set(level1, new Map());
+    const inner = tree.get(level1)!;
+    if (!inner.has(level2)) inner.set(level2, []);
+    inner.get(level2)!.push(it);
+  }
+
+  const blocks: string[] = [];
+  for (const [level1, level2Map] of tree) {
+    const key1 = groupKey(level1);
+    const open1 = isOpen(key1);
+    const total1 = [...level2Map.values()].reduce((n, l) => n + l.length, 0);
+    blocks.push(
+      `<button class="lib-group-head lv1${open1 ? " open" : ""}" data-key="${escapeAttr(key1)}">` +
+        `<span class="caret">${open1 ? "▾" : "▸"}</span>${escapeHtml(level1)}` +
+        `<span class="lib-group-count">${level2Map.size} 类 / ${total1} 件</span></button>`,
+    );
+    if (!open1) continue;
+
+    for (const [level2, list] of level2Map) {
+      const key2 = groupKey(level1, level2);
+      const open2 = isOpen(key2);
+      blocks.push(
+        `<button class="lib-group-head lv2${open2 ? " open" : ""}" data-key="${escapeAttr(key2)}">` +
+          `<span class="caret">${open2 ? "▾" : "▸"}</span>${escapeHtml(level2)}` +
+          `<span class="lib-group-count">${list.length} 件</span></button>`,
+      );
+      if (!open2) continue;
+      for (const it of list) {
+        blocks.push(
+          `<button class="lib-item lv3" data-lib="${escapeAttr(it.id)}">` +
+            `<span class="lib-name">${escapeHtml(it.name)}</span>` +
+            `<span class="lib-meta">${it.width}×${it.height}｜需${it.requiredLevel}级｜${it.stats.length} 条属性</span>` +
+            `</button>`,
+        );
+      }
+    }
+  }
+  $("#lib-items").innerHTML =
+    blocks.length > 0 ? blocks.join("") : `<div class="muted">没有匹配的装备</div>`;
+
+  // 每层组头都可折叠
+  $("#lib-items")
+    .querySelectorAll<HTMLButtonElement>("button[data-key]")
+    .forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.key ?? "";
+        if (expandedGroups.has(key)) expandedGroups.delete(key);
+        else expandedGroups.add(key);
+        renderLibraryItems();
+      });
+    });
+
+  // **点一下就直接放进物品栏**：不再"先选中、再点导入"两步确认。
+  // 导入成功后关掉弹窗，让用户直接看到物品落到了哪一格。
   $("#lib-items")
     .querySelectorAll<HTMLButtonElement>("button[data-lib]")
     .forEach((btn) => {
       btn.addEventListener("click", () => {
         librarySelected = btn.dataset.lib ?? null;
-        renderLibraryItems();
-        const item = libraryItems.find((i) => i.id === librarySelected);
-        if (item) {
-          $("#lib-detail").textContent =
-            `${item.name}（${item.code}）｜${item.quality}·${item.group}｜` +
-            `占 ${item.width}×${item.height}｜需求等级 ${item.requiredLevel}｜属性 ${item.stats.length} 条`;
-        }
-        $("#btn-lib-import").toggleAttribute("disabled", !librarySelected);
+        void importLibraryNow();
       });
     });
-  $("#btn-lib-import").toggleAttribute("disabled", !librarySelected);
 }
 
 /** 把装备库选中项导入到当前容器（物品上右键时用它的容器，空白处用所在容器）。 */
@@ -1723,7 +1845,8 @@ async function importLibraryNow() {
       "import_library_item",
       { id: librarySelected, storePage: page },
     );
-    toast(`已导入「${r.name}」（${r.stats} 条属性）到 (${r.col}, ${r.row})。点「保存」才写入文件。`);
+    toast(`已放入「${r.name}」（${r.stats} 条属性）到 (${r.col}, ${r.row})。点「保存」才写入文件。`);
+    librarySelected = null;
     $("#lib-modal").classList.add("hidden");
     await loadAll();
   } catch (e) {
@@ -1813,4 +1936,109 @@ async function exportAllItems() {
   } catch (e) {
     showError(e, "导出物品栏失败");
   }
+}
+
+/** 删除一件物品（含其中镶嵌的宝石/符文）。 */
+async function deleteItemNow(index: number) {
+  try {
+    const left = await call<number>("delete_item", { index });
+    toast(`已删除，物品栏剩 ${left} 件。点「保存」才写入文件。`);
+    await loadAll();
+  } catch (e) {
+    showError(e, "删除物品被拒绝");
+  }
+}
+
+/** 正在重命名的物品序号。 */
+let renameTarget: number | null = null;
+
+/** 打开重命名弹窗，预填当前的自定义名字。 */
+function openRename(index: number) {
+  renameTarget = index;
+  const current = items.find((i) => i.index === index)?.personalizedName ?? "";
+  const input = $("#rename-input") as HTMLInputElement;
+  input.value = current;
+  updateRenamePreview();
+  $("#rename-modal").classList.remove("hidden");
+  input.focus();
+}
+
+/** 更新预览：游戏会显示成「名字's 底材名」。 */
+function updateRenamePreview() {
+  const value = ($("#rename-input") as HTMLInputElement).value.trim();
+  const base =
+    (items.find((i) => i.index === renameTarget)?.name ?? "底材名").split("'s ").pop() ??
+    "底材名";
+  $("#rename-preview").textContent = value === "" ? "（未命名）" : value;
+  void base;
+}
+
+/** 提交重命名。 */
+async function applyRename() {
+  if (renameTarget === null) return;
+  const name = ($("#rename-input") as HTMLInputElement).value.trim();
+  try {
+    await call<null>("rename_item", { index: renameTarget, name });
+    $("#rename-modal").classList.add("hidden");
+    toast(name === "" ? "已清除命名。" : `已命名为「${name}」。点「保存」才写入文件。`);
+    await loadAll();
+  } catch (e) {
+    showError(e, "重命名被拒绝");
+  }
+}
+
+/**
+ * 有弹窗打开时锁住页面滚动。
+ *
+ * 用 MutationObserver 统一处理，而不是在每个 open/close 里各写一遍：
+ * 弹窗有好几个（属性、设置、装备库、重命名），漏掉一处就会"弹窗开着还能滚背景"。
+ */
+function watchModalScrollLock() {
+  const sync = () => {
+    const anyOpen = document.querySelector(".modal:not(.hidden)") !== null;
+    document.body.classList.toggle("modal-open", anyOpen);
+  };
+  const observer = new MutationObserver(sync);
+  document.querySelectorAll(".modal").forEach((el) => {
+    observer.observe(el, { attributes: true, attributeFilter: ["class"] });
+  });
+  sync();
+}
+
+/** 把一条属性的层从 `from` 换成 `to`（值保持不变）。 */
+async function relayerStatNow(stat: number, from: number, to: number) {
+  if (selectedItem === null) return;
+  try {
+    await call<number>("apply_item_edits", {
+      edits: [{ kind: "relayerStat", index: selectedItem, stat, from, to }],
+    });
+    toast("值2 已更改。点「保存」才写入文件。");
+    await loadAll();
+  } catch (e) {
+    showError(e, "修改值2 被拒绝");
+  }
+}
+
+/**
+ * 版本号与"检查更新"。
+ *
+ * 版本号从后端拿（`Cargo.toml` 是唯一来源，不在前端写死，免得两边不同步）。
+ * "检查更新"不在程序里联网，直接打开项目的 Releases 页面。
+ */
+async function setupVersionAndUpdate() {
+  try {
+    const version = await call<string>("app_version");
+    $("#app-version").textContent = `v${version}`;
+    $("#settings-version").textContent = `当前版本 v${version}`;
+  } catch {
+    // 拿不到版本不影响使用，静默跳过
+  }
+  $("#btn-check-update").addEventListener("click", async () => {
+    try {
+      await call<string>("open_releases_page");
+      toast("已在浏览器打开 Releases 页面");
+    } catch (e) {
+      showError(e, "打开 Releases 页面失败");
+    }
+  });
 }

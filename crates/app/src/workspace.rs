@@ -353,6 +353,15 @@ impl Workspace {
     /// 角色信息。
     pub fn character(&self) -> Result<CharacterDto, AppError> {
         let v = self.session()?.character();
+        // 生命/法力/体力在存档里按 1/256 精度存（`ValShift = 8`），
+        // 直接给原始值会比游戏里大 256 倍。这里按属性表的精度换算回游戏值，
+        // 力量/敏捷等 `ValShift = 0` 的属性不受影响。
+        let shown = |id: d2s::StatId, raw: i64| -> i64 {
+            self.stat_limits
+                .get(id.0)
+                .map(|l| l.display_value(raw) as i64)
+                .unwrap_or(raw)
+        };
         Ok(CharacterDto {
             name: v.name,
             class: v.class,
@@ -363,11 +372,11 @@ impl Workspace {
             energy: v.energy,
             stat_points: v.stat_points,
             skill_points: v.skill_points,
-            life: v.life,
-            max_life: v.max_life,
-            mana: v.mana,
-            max_mana: v.max_mana,
-            stamina: v.stamina,
+            life: shown(d2s::StatId::LIFE, v.life),
+            max_life: shown(d2s::StatId::MAX_LIFE, v.max_life),
+            mana: shown(d2s::StatId::MANA, v.mana),
+            max_mana: shown(d2s::StatId::MAX_MANA, v.max_mana),
+            stamina: shown(d2s::StatId::STAMINA, v.stamina),
             experience: v.experience,
             gold: v.gold,
             stash_gold: v.stash_gold,
@@ -566,6 +575,7 @@ impl Workspace {
                     .map(|(layer, label)| ParamOptionDto {
                         layer: layer as i32,
                         label,
+                        group: None,
                     })
                     .collect()
             }
@@ -614,6 +624,55 @@ impl Workspace {
                     .map(|(layer, label)| ParamOptionDto {
                         layer: layer as i32,
                         label,
+                        group: None,
+                    })
+                    .collect()
+            }
+            // 技能类属性：层 = 技能 ID
+            //
+            //   107 item_singleskill    **限定职业**的技能等级（"+3 火焰弹"）
+            //    97 item_nonclassskill  **不限定职业**的技能等级（`oskill` 那类）
+            //   204 item_charged_skill  **聚气**（自带 N 次充能的技能）
+            //
+            // 三者层的含义相同（技能 ID），区别只在"能不能跨职业"。界面统一给
+            // **两级选单**：第一级选职业，第二级选该职业的技能；97 额外多一个
+            // "不限职业"分组，用来选非职业技能。
+            //
+            // 只列有名字的技能；表里 `charclass` 为空的（攻击/脚踢/投掷这类
+            // 基础动作）只在 97 的"不限职业"分组里出现。
+            97 | 107 | 204 => {
+                // 用户要求：不列"不限职业"那一组，只按职业选
+                let allow_non_class = false;
+                let mut rows: Vec<(String, u16, String)> = {
+                    let Some(table) = self.tables.get("skills") else {
+                        return Vec::new();
+                    };
+                    (0..table.len())
+                        .filter_map(|row| {
+                            let class = table
+                                .cell_nonempty(row, "charclass")
+                                .unwrap_or("")
+                                .to_string();
+                            if class.is_empty() && !allow_non_class {
+                                return None;
+                            }
+                            let skill_id = table.int(row, "*Id")?;
+                            let skill_id = u16::try_from(skill_id).ok()?;
+                            let name = skills.get(&skill_id)?.clone();
+                            // `charclass` 是 `ama`/`sor` 这种短码，
+                            // 换成中文职业名做分组标题
+                            let group = class_short_zh(&class);
+                            Some((group, skill_id, name))
+                        })
+                        .collect()
+                };
+                rows.sort_by(|a, b| (a.0.as_str(), a.1).cmp(&(b.0.as_str(), b.1)));
+                rows.dedup_by_key(|(_, id, _)| *id);
+                rows.into_iter()
+                    .map(|(group, layer, label)| ParamOptionDto {
+                        layer: layer as i32,
+                        label,
+                        group: Some(group),
                     })
                     .collect()
             }
@@ -798,6 +857,20 @@ impl Workspace {
             .into_iter()
             .map(|d| {
                 let n = namer.resolve(&d.code, &d.quality, d.quality_index);
+                // 自造的空白暗金护符：暗金名字由表行决定，这里改回我们自己的名字
+                let name = if !d.personalized_name.is_empty() {
+                    // 自定义名字优先：游戏里也显示成"名字's 底材名"，这里只显示名字
+                    d.personalized_name.clone()
+                } else if crate::library::is_blank_charm(
+                    &d.code,
+                    &d.quality,
+                    d.quality_index,
+                    d.stats.len(),
+                ) {
+                    crate::library::blank_charm_name(&self.lang).to_string()
+                } else {
+                    n.display()
+                };
                 // "书只占一格"的设置在这里生效：渲染与拖拽都按这个尺寸走
                 let (w, h) = self
                     .layout
@@ -805,8 +878,9 @@ impl Workspace {
                 ItemDto {
                     index: d.index,
                     code: d.code,
-                    name: n.display(),
+                    name,
                     name_resolved: n.resolved,
+                    personalized_name: d.personalized_name.clone(),
                     quality: d.quality,
                     level: d.level,
                     mode: d.mode,
@@ -929,6 +1003,33 @@ impl Workspace {
             row,
         })
     }
+    /// 给物品起自定义名字（空字符串表示清除）。
+    pub fn rename_item(&mut self, index: usize, name: &str) -> Result<(), AppError> {
+        self.session_mut()?
+            .apply_item(d2r_core::ItemEdit::RenameItem {
+                index,
+                name: name.to_string(),
+            })
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Ok(())
+    }
+
+    /// 删除一件物品，返回剩余件数。
+    ///
+    /// 删除会**同时带走镶嵌在它里面的物品**（宝石/符文），这是游戏语义：
+    /// 镶孔物不是独立物品。删除后序号会前移，所以界面要整表重读。
+    pub fn delete_item(&mut self, index: usize) -> Result<usize, AppError> {
+        let before = self.session()?.item_count();
+        self.session_mut()?
+            .apply_item(d2r_core::ItemEdit::Remove { index })
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        let after = self.session()?.item_count();
+        if after >= before {
+            return Err(AppError::invalid("删除没有生效".to_string()));
+        }
+        Ok(after)
+    }
+
     /// 复制一件物品到同容器的空位。
     ///
     /// 用 `CloneItem`（复制整条记录）而不是重新构造：复制要**连品质数据、
@@ -1070,7 +1171,21 @@ impl Workspace {
         let detail = { self.session()?.item_detail_on(target, index)? };
         let size_map = crate::bundle::item_size_map();
         let mut namer = ItemNamer::new(&self.strings, &mut self.tables, self.lang.clone());
-        let n = namer.resolve(&detail.code, &detail.quality, detail.quality_index);
+        let mut n = namer.resolve(&detail.code, &detail.quality, detail.quality_index);
+        // 自造的空白暗金护符：名字改回我们自己的（见表里 `is_blank_charm` 的说明）
+        if crate::library::is_blank_charm(
+            &detail.code,
+            &detail.quality,
+            detail.quality_index,
+            detail.stats.len(),
+        ) {
+            n = d2r_data::ItemName {
+                base: crate::library::blank_charm_name(&self.lang).to_string(),
+                resolved: true,
+                quality_prefix: None,
+                note: None,
+            };
+        }
         // 同样考虑"书只占一格"的设置，否则弹窗里的占格会和网格里显示的不一致
         let (w, h) = self.layout.item_size(
             &detail.code,
@@ -1160,8 +1275,13 @@ impl Workspace {
             item: ItemDto {
                 index: detail.index,
                 code: detail.code,
-                name: n.display(),
+                name: if detail.personalized_name.is_empty() {
+                    n.display()
+                } else {
+                    detail.personalized_name.clone()
+                },
                 name_resolved: n.resolved,
+                personalized_name: detail.personalized_name.clone(),
                 quality: detail.quality,
                 level: detail.level,
                 mode: detail.mode,
@@ -1329,7 +1449,8 @@ impl Workspace {
         }
         for e in edits {
             match e {
-                d2r_core::ItemEdit::SetStat { stat, value, .. } => {
+                d2r_core::ItemEdit::SetStat { stat, value, .. }
+                | d2r_core::ItemEdit::AddStat { stat, value, .. } => {
                     self.check_one_stat(*stat, *value)?;
                 }
                 d2r_core::ItemEdit::ReplaceStats { stats, .. } => {
@@ -1370,7 +1491,17 @@ impl Workspace {
                 } => ItemEdit::SetStat {
                     index: *index,
                     stat: *stat,
-                    // 界面给的就是存档里的值（按数据大小处理），这里只是补齐类型
+                    value: self.stat_limits.display_to_raw(*stat, *value as f64),
+                    layer: *layer,
+                },
+                ItemEdit::AddStat {
+                    index,
+                    stat,
+                    value,
+                    layer,
+                } => ItemEdit::AddStat {
+                    index: *index,
+                    stat: *stat,
                     value: self.stat_limits.display_to_raw(*stat, *value as f64),
                     layer: *layer,
                 },
@@ -1650,8 +1781,8 @@ fn catalog_name(id: u16, display: &str) -> String {
         // 下面几条的模板里含**两个**占位符（技能 + 职业），洗掉占位符后
         // 只剩下连接词（`'%+d 至%s %s'` → "至"），当名字毫无意义，
         // 所以给它们固定的可读名。
-        107 => "指定技能等级".to_string(),
-        97 => "非职业技能等级".to_string(),
+        107 => "指定技能等级（限定职业）".to_string(),
+        97 => "指定技能等级（不限职业）".to_string(),
         188 => "指定技能页等级".to_string(),
         195 => "攻击时施放技能".to_string(),
         196 => "杀死敌人时施放技能".to_string(),
@@ -1669,6 +1800,26 @@ fn catalog_name(id: u16, display: &str) -> String {
 ///
 /// 参数位里存的是**职业行号**，展示时必须让用户看懂是哪个职业；
 /// 数据表里只有英文名。认不出来时原样返回英文，不猜。
+/// `skills.txt` 的 `charclass` 短码 → 中文职业名。
+///
+/// 技能表用 `ama`/`sor` 这类三字母短码，界面要显示"亚马逊"。
+/// 与 [`class_name_zh`] 分开：那个吃的是 `PlayerClass` 的英文全名。
+fn class_short_zh(code: &str) -> String {
+    match code {
+        "ama" => "亚马逊",
+        "sor" => "法师",
+        "nec" => "死灵法师",
+        "pal" => "圣骑士",
+        "bar" => "野蛮人",
+        "dru" => "德鲁伊",
+        "ass" => "刺客",
+        "war" => "巫师",
+        // 未知职业原样显示，便于排查
+        other => other,
+    }
+    .to_string()
+}
+
 fn class_name_zh(english: &str) -> &str {
     match english {
         "Amazon" => "亚马逊",

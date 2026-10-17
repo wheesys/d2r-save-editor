@@ -29,6 +29,82 @@ export interface StatLike {
   paramOptions?: { layer: number; label: string }[];
 }
 
+
+/** 参数选项（值2 的可选值），可能带分组（如技能所属职业）。 */
+export interface LayerOption {
+  layer: number;
+  label: string;
+  group?: string | null;
+}
+
+/**
+ * 生成"值2"控件。
+ *
+ * 三种形态：
+ * 1. 没有可选值 → 数字输入框（自己填层号）；
+ * 2. 有可选值、不分级 → 单个下拉（如职业、光环）；
+ * 3. 有可选值、带分组 → **两级选单**：左边选分组（职业），右边选具体项（技能）。
+ *
+ * 为什么用两个下拉而不是 `<optgroup>`：原生 `optgroup` 只能做视觉分组，
+ * 不能收起，也不能筛选；两个下拉里左边那个天然就是"收起/切换"的入口，
+ * 200 多个技能也不会挤成一条长列表。
+ *
+ * `attrs` 是给**真正承载层号**的那个控件加的属性（`data-stat-layer-sel`
+ * 等），上级的分组下拉不加，免得被当成值改动触发保存。
+ */
+export function renderLayerControl(
+  id: number,
+  current: number,
+  options: LayerOption[],
+  attrs: string,
+): string {
+  if (options.length === 0) {
+    return `<input type="text" inputmode="numeric" value="${current}" ${attrs} />`;
+  }
+  const groups = [...new Set(options.map((o) => o.group ?? ""))];
+  const grouped = groups.length > 1 || (groups.length === 1 && groups[0] !== "");
+  if (!grouped) {
+    return `<select ${attrs}>${options
+      .map(
+        (o) =>
+          `<option value="${o.layer}"${o.layer === current ? " selected" : ""}>${escapeHtml(o.label)}</option>`,
+      )
+      .join("")}</select>`;
+  }
+
+  // 当前层所属分组；找不到就用第一个分组
+  const currentGroup =
+    options.find((o) => o.layer === current)?.group ??
+    options.find((o) => (o.group ?? "") !== "")?.group ??
+    groups[0];
+  const inGroup = options.filter((o) => (o.group ?? "") === currentGroup);
+  // 当前层不在任何分组里（未知值）时补一条，避免下拉"假装"选中了第一项
+  const missing = !inGroup.some((o) => o.layer === current);
+  const skills = missing
+    ? [{ layer: current, label: `层 ${current}（未知）` }, ...inGroup]
+    : inGroup;
+
+  return (
+    `<span class="layer-pair" data-layer-pair="${id}">` +
+    `<select class="layer-group-sel" data-layer-for="${id}" title="分组">` +
+    groups
+      .map(
+        (g) =>
+          `<option value="${escapeAttr(g)}"${g === currentGroup ? " selected" : ""}>${escapeHtml(g || "其它")}</option>`,
+      )
+      .join("") +
+    `</select>` +
+    `<select class="cell-select" ${attrs}>` +
+    skills
+      .map(
+        (o) =>
+          `<option value="${o.layer}"${o.layer === current ? " selected" : ""}>${escapeHtml(o.label)}</option>`,
+      )
+      .join("") +
+    `</select></span>`
+  );
+}
+
 /** 最小 HTML 转义（属性值用）。 */
 export function escapeAttr(text: unknown): string {
   return String(text)
@@ -51,14 +127,17 @@ export function escapeHtml(text: unknown): string {
  * `displayValue`，再不行给空串。
  */
 export function statValueText(stat: StatLike): string {
-  if (typeof stat.value === "number" && Number.isFinite(stat.value)) {
-    return String(stat.value);
-  }
+  // **优先用 `displayValue`**：带 `ValShift` 的属性（生命/法力按等级）在存档里
+  // 按 1/256 精度存，原始 `value` 是 16128，而游戏里是 63。后端已经算好
+  // `displayValue`，这里再优先取 `value` 就会把 16128 显示出来（踩过）。
   if (
     typeof stat.displayValue === "number" &&
     Number.isFinite(stat.displayValue)
   ) {
     return String(stat.displayValue);
+  }
+  if (typeof stat.value === "number" && Number.isFinite(stat.value)) {
+    return String(stat.value);
   }
   return "";
 }
@@ -80,7 +159,13 @@ export function renderStatRow(stat: StatLike): string {
   }
   if (stat.rangeText) parts.push(`有效范围 ${stat.rangeText}`);
   // 参数含义（如"获得 31 级「狂热」光环"、"法师 技能等级 +7"）
-  if (stat.paramLabel) parts.push(stat.paramLabel);
+  // 说明里的参数名优先取**下拉选项里的标签**：后端那份 `paramLabel`
+  // 可能和选项表对不上（出现过"下拉是能量盾、说明写攻击"）。
+  const optionLabel = (stat.paramOptions ?? []).find(
+    (o) => o.layer === stat.layer,
+  )?.label;
+  if (optionLabel) parts.push(optionLabel);
+  else if (stat.paramLabel) parts.push(stat.paramLabel);
   if (stat.userVisible === false) parts.push("内部字段");
   const note = parts.length
     ? `<span class="muted">${escapeHtml(parts.join("｜"))}</span>`
@@ -90,19 +175,12 @@ export function renderStatRow(stat: StatLike): string {
   // 否则是可编辑的数字输入框。
   let secondCell = "";
   if (stat.hasLayer) {
-    const options = stat.paramOptions ?? [];
-    secondCell =
-      options.length > 0
-        ? `<select class="cell-select" data-stat-layer-sel="${stat.id}"
-             data-stat-layer-cur="${stat.layer}">${options
-             .map(
-               (option) =>
-                 `<option value="${option.layer}"${option.layer === stat.layer ? " selected" : ""}>${escapeHtml(option.label)}</option>`,
-             )
-             .join("")}</select>`
-        : `<input type="text" inputmode="numeric" class="cell-input" value="${stat.layer}"
-             data-stat-layer-sel="${stat.id}" data-stat-layer-cur="${stat.layer}"
-             data-layer-plain="1" />`;
+    secondCell = renderLayerControl(
+      stat.id,
+      stat.layer,
+      stat.paramOptions ?? [],
+      `class="cell-input" data-stat-layer-sel="${stat.id}" data-stat-layer-cur="${stat.layer}"`,
+    );
   }
 
   const hint =

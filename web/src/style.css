@@ -252,7 +252,8 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 /* ===== 弹窗 ===== */
 .modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; }
 .modal.hidden { display: none; }
-.modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
+/* `.modal` 已自带遮罩，这里保持透明，避免两层叠得过黑 */
+.modal-backdrop { position: absolute; inset: 0; background: transparent; }
 .modal-body {
   position: relative;
   background: var(--panel);
@@ -262,6 +263,8 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
   width: min(880px, 92vw);
   max-height: 88vh;
   overflow: auto;
+  /* 滚到边界后不要带动下层页面 */
+  overscroll-behavior: contain;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -514,8 +517,11 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 
 /* 装备库列表 */
 .lib-items {
-  max-height: 380px;
+  /* 相对视口收一点，保证弹窗整体不超出屏幕 */
+  max-height: min(420px, 46vh);
   overflow-y: auto;
+  /* 滚到底/顶后不要把滚动传给后面的页面 */
+  overscroll-behavior: contain;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 6px;
@@ -537,3 +543,155 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
 .lib-item.selected { border-color: var(--accent); background: var(--panel-2); }
 .lib-name { font-size: 13px; }
 .lib-meta { font-size: 11px; color: var(--muted); }
+
+/* 装备库分组标题（套装名 / 物品类型） */
+.lib-group-head {
+  grid-column: 1 / -1;
+  margin: 8px 0 2px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--accent);
+}
+
+/* 套装组头：可点击展开/收起 */
+.lib-group-head.collapsible {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 2px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--accent);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.lib-group-head.collapsible:hover { color: var(--fg); }
+.lib-group-head .caret { width: 12px; }
+.lib-group-count { margin-left: auto; color: var(--muted); }
+
+/* ===== 通用弹窗外框 =====
+ * `.modal` 自己铺满全屏并带暗色遮罩：**完全遮住下面的界面**，
+ * 不依赖每个弹窗自己塞 backdrop 元素。
+ */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.62);
+  /* 遮罩层自身不滚动，滚轮交给弹窗内容 */
+  overscroll-behavior: contain;
+}
+.modal.hidden { display: none; }
+
+/* 弹窗盒子：定宽 + 最大高度 + 内部滚动 */
+.modal-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(560px, 92vw);
+  max-height: 86vh;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  /* 内容超出时只滚弹窗内部，且滚到边界**不带动下层页面** */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.modal-box.wide { width: min(980px, 94vw); }
+
+/* 弹窗打开时锁住页面滚动，避免背景跟着滚 */
+body.modal-open { overflow: hidden; }
+
+/* 装备库三层树：第一层 绿装/暗金，第二层 套装名或物品类型 */
+.lib-group-head.lv1 {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  background: var(--panel-2);
+  border-radius: 4px;
+  border-bottom: 0;
+  padding: 6px 8px;
+  margin-top: 4px;
+}
+.lib-group-head.lv2 {
+  grid-column: 1 / -1;
+  padding-left: 22px;
+  border-bottom: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.lib-group-head.lv1.open,
+.lib-group-head.lv2.open { color: var(--accent); }
+.lib-item.lv3 { margin-left: 30px; }
+
+/* 值2 的两级选单（职业 → 技能）：
+ * 两个下拉并排时行会被撑宽，横向滚动条一出现，「值1」就被挤成窄条看着像没数据。
+ * 这里给固定上限宽度并允许收缩，保证整表不出现横向滚动。 */
+.layer-pair {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  min-width: 0;
+}
+.layer-pair .layer-group-sel {
+  flex: 0 0 96px;
+  min-width: 0;
+}
+.layer-pair .cell-select {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+/* 值1 保持能看清数字的最小宽度 */
+.cell-input { min-width: 72px; }
+
+/* ===== 物品属性弹窗：加宽 + 不横向滚动 =====
+ * 三处导致横向滚动条：
+ *   1. 弹窗只有 880px，属性表 6 列塞不下；
+ *   2. `#item-stats td { white-space: nowrap }` 把"说明"列撑得很宽；
+ *   3. `.table-wrap { overflow: auto }` 横竖都出滚动条。
+ * 这里：加宽弹窗、允许属性名与说明换行、固定列宽、只保留竖向滚动。 */
+#item-modal .modal-body {
+  width: min(1180px, 96vw);
+}
+#item-modal .table-wrap {
+  max-height: 52vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+#item-stats {
+  table-layout: fixed;
+  width: 100%;
+}
+#item-stats th,
+#item-stats td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+#item-stats th:nth-child(1), #item-stats td:nth-child(1) { width: 48px; }
+#item-stats th:nth-child(2), #item-stats td:nth-child(2) { width: 200px; }
+#item-stats th:nth-child(3), #item-stats td:nth-child(3) { width: 108px; }
+#item-stats th:nth-child(4), #item-stats td:nth-child(4) { width: 248px; }
+#item-stats th:nth-child(6), #item-stats td:nth-child(6) { width: 66px; }
+/* 单元格里的控件铺满列宽，不再撑破表格 */
+#item-stats .cell-input,
+#item-stats .cell-select {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+/* 右上角版本号 */
+.version-tag { margin-left: auto; font-size: 12px; opacity: 0.75; }
+

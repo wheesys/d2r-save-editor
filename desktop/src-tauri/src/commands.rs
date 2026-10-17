@@ -201,6 +201,18 @@ pub fn export_item(state: State<'_, AppState>, index: usize) -> R<d2r_core::Item
 pub fn export_items(state: State<'_, AppState>) -> R<Vec<d2r_core::ItemBlueprint>> {
     state.0.lock().unwrap().export_blueprints()
 }
+
+/// 删除一件物品（含其镶嵌物）。
+#[tauri::command]
+pub fn delete_item(state: State<'_, AppState>, index: usize) -> R<usize> {
+    state.0.lock().unwrap().delete_item(index)
+}
+
+/// 给物品起自定义名字（空字符串清除命名）。
+#[tauri::command]
+pub fn rename_item(state: State<'_, AppState>, index: usize, name: String) -> R<()> {
+    state.0.lock().unwrap().rename_item(index, &name)
+}
 /// 把物品蓝图写到文件。
 #[tauri::command]
 pub fn write_blueprint(path: String, json: String) -> R<String> {
@@ -301,4 +313,35 @@ pub fn duplicate_item(
         .lock()
         .unwrap()
         .duplicate_item(index, store_page.as_deref())
+}
+
+/// 项目的 Releases 页面（"检查更新"按钮打开的就是它）。
+pub const RELEASES_URL: &str = "https://github.com/wheesys/d2r-save-editor/releases";
+
+/// 当前版本号（取自 `Cargo.toml`，界面右上角显示）。
+#[tauri::command]
+pub fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// 用系统默认浏览器打开 Releases 页面。
+///
+/// 不在程序里做联网检查：那要额外拉网络权限、还要处理失败分支，
+/// 而用户真正需要的是"能拿到新版本"，直接打开页面最省事也最可靠。
+#[tauri::command]
+pub fn open_releases_page() -> R<String> {
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("cmd")
+        .args(["/C", "start", "", RELEASES_URL])
+        .status();
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(RELEASES_URL).status();
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let status = std::process::Command::new("xdg-open").arg(RELEASES_URL).status();
+
+    match status {
+        Ok(s) if s.success() => Ok(RELEASES_URL.to_string()),
+        Ok(_) => Err(d2r_app::AppError::new("open", "浏览器没有成功打开".to_string())),
+        Err(e) => Err(d2r_app::AppError::new("open", format!("打不开浏览器：{e}"))),
+    }
 }

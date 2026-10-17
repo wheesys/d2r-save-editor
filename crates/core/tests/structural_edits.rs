@@ -143,3 +143,76 @@ fn non_structural_edit_keeps_file_length() {
     assert_eq!(rt.original_len, rt.rewritten_len, "改耐久不应改变文件长度");
     assert_self_consistent(&path, "改耐久前（未落盘，仅结构）");
 }
+
+#[test]
+fn rename_adds_personalized_name_and_grows_record() {
+    // 重命名会往物品记录里**追加一个字符串**，属于改长度的编辑：
+    // 后面所有字节都位移，所以必须重新算头部长度与校验和，否则文件报废。
+    let path = skip_without_sample!("rename");
+    let mut s = EditSession::open(&path).unwrap();
+    let before = s.file.check_roundtrip();
+    s.apply_item(ItemEdit::RenameItem {
+        index: 0,
+        name: "上帝法印".to_string(),
+    })
+    .unwrap();
+    let (_, ok) = s.verify().unwrap();
+    assert!(ok, "写前校验应通过");
+    s.save().unwrap();
+
+    let re = EditSession::open(&path).unwrap();
+    assert_eq!(
+        re.item_detail(0).unwrap().personalized_name,
+        "上帝法印",
+        "自定义名字应落盘"
+    );
+    let after = re.file.check_roundtrip();
+    assert!(
+        after.original_len > before.original_len,
+        "加了名字，记录变长，文件总长应变大"
+    );
+    assert_self_consistent(&path, "重命名");
+}
+
+#[test]
+fn clearing_rename_removes_flag_and_shrinks_back() {
+    // 清除命名要**同时**清字符串与 PERSONALIZED 标志：
+    // 只清字符串会写出一个空字符串段，物品记录仍带着"已命名"的位。
+    let path = skip_without_sample!("rename_clear");
+    let mut s = EditSession::open(&path).unwrap();
+    let baseline = s.file.check_roundtrip().original_len;
+    s.apply_item(ItemEdit::RenameItem {
+        index: 0,
+        name: "临时".to_string(),
+    })
+    .unwrap();
+    s.apply_item(ItemEdit::RenameItem {
+        index: 0,
+        name: String::new(),
+    })
+    .unwrap();
+    s.save().unwrap();
+
+    let re = EditSession::open(&path).unwrap();
+    assert_eq!(re.item_detail(0).unwrap().personalized_name, "");
+    assert_eq!(
+        re.file.check_roundtrip().original_len,
+        baseline,
+        "清除命名后应回到原长度"
+    );
+    assert_self_consistent(&path, "清除命名");
+}
+
+#[test]
+fn rename_rejects_overlong_name() {
+    // 游戏侧的字名有长度上限，超长会被截断；这里先拦，不写坏数据。
+    let path = skip_without_sample!("rename_long");
+    let mut s = EditSession::open(&path).unwrap();
+    let err = s
+        .apply_item(ItemEdit::RenameItem {
+            index: 0,
+            name: "一二三四五六七八九十一二三四五六".to_string(),
+        })
+        .unwrap_err();
+    assert!(err.to_string().contains("15"), "应提示长度上限：{err}");
+}

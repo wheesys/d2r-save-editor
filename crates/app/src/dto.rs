@@ -180,6 +180,8 @@ pub struct ItemDto {
     pub name: String,
     /// 名字是否解析成功。
     pub name_resolved: bool,
+    /// 自定义名字（`personalized_name`，空表示没有）。
+    pub personalized_name: String,
     /// 品质。
     pub quality: String,
     /// 物品等级。
@@ -284,8 +286,12 @@ pub struct ItemStatDto {
 pub struct ParamOptionDto {
     /// 层号（写回存档的值）。
     pub layer: i32,
-    /// 该层的含义（如"法师"、"狂热"）。
+    /// 该层的含义（如"法师"、"狂热"、"火焰弹"）。
     pub label: String,
+    /// 所属分组（如技能所属职业）。界面用它做**两级选单**：
+    /// 第一级选分组（职业），第二级选具体项（技能）。`None` 表示不分级。
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 /// 一件物品的完整明细（界面的物品编辑面板用）。

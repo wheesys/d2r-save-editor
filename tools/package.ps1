@@ -138,7 +138,7 @@ Ok "d2r-desktop.exe（$exeMb MB）"
 
 # 4) 产出单文件 exe（数据与界面资源都在里面，配套一份说明）
 Step '产出单文件 exe'
-$outName = "D2RSaveEditor-$Version-win-x64.exe"
+$outName = "D2RSaveEditor-win-x64.exe"
 $outExe = Join-Path $dist $outName
 Copy-Item $exe $outExe -Force
 $outMb = [math]::Round((Get-Item $outExe).Length / 1MB, 1)
@@ -200,13 +200,13 @@ MIT License (c) 2026 wheesys，源码见上方链接。
 本程序按"现状"提供，不附带任何担保。改存档有风险，可能导致角色/物品损坏
 或无法进入游戏，请务必自己保留备份，后果由使用者自行承担。
 "@
-$usagePath = Join-Path $dist "使用说明-$Version.txt"
+$usagePath = Join-Path $dist "使用说明.txt"
 Set-Content -Path $usagePath -Value $usage -Encoding UTF8
-Ok "使用说明-$Version.txt"
+Ok "使用说明.txt"
 
 if ($AlsoZip) {
     Step '另外打一个 zip（含 exe 与说明）'
-    $stage = Join-Path $dist "d2r-save-editor-$Version-win-x64"
+    $stage = Join-Path $dist "d2r-save-editor-win-x64"
     if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
     Copy-Item $outExe (Join-Path $stage 'd2r-save-editor.exe')
@@ -215,7 +215,7 @@ if ($AlsoZip) {
         $src = Join-Path $repo $doc
         if (Test-Path $src) { Copy-Item $src $stage }
     }
-    $zip = Join-Path $dist "d2r-save-editor-$Version-win-x64.zip"
+    $zip = Join-Path $dist "d2r-save-editor-win-x64.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
     Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
     Ok "$([System.IO.Path]::GetFileName($zip))（$([math]::Round((Get-Item $zip).Length/1MB,1)) MB）"

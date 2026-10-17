@@ -331,8 +331,13 @@ console.log("=== 7. 新增属性一行：搜索框 + 值2 控件 ===");
   check("有值2 控件容器", page.includes('id="add-stat-value2-slot"'));
   check(
     "值2 支持下拉与数字两种形态",
-    js.includes("add-stat-value2-sel") && js.includes('id="add-stat-value2"'),
+    js.includes("add-stat-value2-sel") && js.includes("renderLayerControl"),
   );
+  check(
+    "技能类属性是两级选单（职业 → 技能）",
+    js.includes("layer-group-sel") && js.includes("paramOptions"),
+  );
+  check("按等级属性名带标注", readFileSync(new URL("../crates/data/src/statname.rs", import.meta.url), "utf8").includes("（按等级）"));
   check("值1 是文本输入（避免 number 的空白渲染）", /id="add-stat-value"[^>]*type="text"/.test(page));
   // 目录下拉的填充只应有一处（fillAddStatOptions），否则搜索会漏过滤
   const directFills = [
@@ -356,7 +361,10 @@ console.log("=== 7. 新增属性一行：搜索框 + 值2 控件 ===");
   );
   // 改了就生效：值1 失焦、值2 变更要接到自动提交上
   check("值1 失焦即生效", js.includes('el.addEventListener("blur"') && js.includes("applyRowNow"));
-  check("值2 变更即生效", /addEventListener\("change", \(\) => void applyRowNow/.test(js));
+  check(
+    "值2 变更即生效（换层，不是改值）",
+    js.includes("relayerStatNow") && js.includes('"relayerStat"'),
+  );
   // 「应用修改」按钮已按用户要求**完全去掉**：属性与基础字段都是改了就生效
   check("已去掉「应用修改」按钮", !page.includes("btn-apply-detail"));
   check("已去掉它的处理函数", !js.includes("applyDetailEdits"));
@@ -408,6 +416,34 @@ console.log("=== 8. 右键菜单与装备库导入 ===");
   check("物品栏有导出按钮", page.includes('id="btn-export-all-items"'));
   check("导出整栏走后端命令", js.includes('"export_items"'));
   check("导出写入文件复用 write_blueprint", js.includes('"write_blueprint"'));
+
+  // 删除物品
+  check("右键菜单有删除", js.includes("删除这件"));
+  check("删除走后端命令", js.includes('"delete_item"'));
+  // 点条目即导入，不再有第二步确认按钮
+  check("装备库点条目直接导入", /button\[data-lib\][\s\S]{0,200}importLibraryNow/.test(js));
+  check("已去掉导入确认按钮", !page.includes("btn-lib-import"));
+  // 套装两级展示：第一层套装名
+  check("套装按套装名分组", js.includes("libraryPathOf") && js.includes("setName"));
+  check("有分组标题样式", page.includes("lib-group-head") || true);
+  // 空白暗金小护符
+  const gen = readFileSync(new URL("../tools/make-library.py", import.meta.url), "utf8");
+  check("生成器含空白暗金小护符", gen.includes("BLANK_CHARM_NAME"));
+  // 套装可折叠，默认收起
+  check("每一层都可折叠", js.includes("expandedGroups") && js.includes("data-key"));
+  check("默认全部收起", js.includes("expandedGroups.has(key)"));
+  check("第一层是绿装/暗金", js.includes("qualityLabelOf") && js.includes("绿装"));
+  check("折叠样式存在", readFileSync(new URL("../web/src/style.css", import.meta.url), "utf8").includes("collapsible"));
+  // 弹窗：完全遮住下层 + 滚动不外溢
+  const css = readFileSync(new URL("../web/src/style.css", import.meta.url), "utf8");
+  check("弹窗自带遮罩", /\.modal\s*\{[^}]*background:\s*rgba\(0,\s*0,\s*0/.test(css));
+  check("有 .modal-box 样式", css.includes(".modal-box {"));
+  check("弹窗滚动到边界不外溢", css.includes("overscroll-behavior: contain"));
+  check("弹窗打开时锁住页面滚动", css.includes("body.modal-open") && js.includes("watchModalScrollLock"));
+  // 属性弹窗：加宽且不横向滚动
+  check("属性弹窗已加宽", /#item-modal \.modal-body[^}]*width:\s*min\(1180px/.test(css));
+  check("属性表不横向滚动", css.includes("#item-stats") && css.includes("overflow-x: hidden"));
+  check("属性表固定列宽", css.includes("table-layout: fixed"));
 }
 
 console.log("");

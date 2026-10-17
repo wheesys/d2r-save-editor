@@ -30,6 +30,11 @@ BUNDLE = REPO / "crates" / "app" / "data-bundle" / "excel"
 OUT = REPO / "crates" / "app" / "data-bundle" / "library" / "items.tsv"
 
 
+# 空白黄金小护符：不带任何属性、需求等级 0，供用户自己加属性。
+BLANK_CHARM_FILE_INDEX = 0
+BLANK_CHARM_NAME = "上帝法印（空白黄金小护符）"
+
+
 def excel_dir() -> pathlib.Path:
     """优先用本机解包目录，没有就用已生成的数据包。"""
     if (EXCEL / "uniqueitems.txt").is_file():
@@ -218,7 +223,19 @@ def main() -> int:
             rules[code] = legs
 
     # 基型尺寸
+    names = load_names()
+    print(f"名字表: {len(names)} 条（{excel_dir()}）")
+
     type_map = load_type_map(directory)
+
+    # 套装名：`setitems.set` 是套装索引，`sets.txt` 的 name 列是显示名键
+    set_names: dict[str, str] = {}
+    for row in load(directory, "sets.txt"):
+        index = row.get("index", "")
+        if not index:
+            continue
+        key = row.get("name", "") or index
+        set_names[index] = names.get(key) or names.get(index) or key
 
     sizes: dict[str, tuple[int, int]] = {}
     for name in ("weapons.txt", "armor.txt", "misc.txt"):
@@ -288,9 +305,6 @@ def main() -> int:
                 return None
         return out or None
 
-    names = load_names()
-    print(f"名字表: {len(names)} 条（{excel_dir()}）")
-
     items: list[tuple] = []
     skipped: dict[str, int] = {}
     stat_ok = 0
@@ -334,6 +348,10 @@ def main() -> int:
                 else:
                     skipped[prop] = skipped.get(prop, 0) + 1
             stats.sort()
+            # 套装条目带上套装名，界面按"套装 → 部件"两级展示
+            set_name = ""
+            if quality == "套装":
+                set_name = set_names.get(row.get("set", ""), "")
             w, h = sizes.get(code, (1, 1))
             items.append(
                 (
@@ -343,6 +361,7 @@ def main() -> int:
                     code,
                     quality,
                     group_of(code, type_map),
+                    set_name,
                     as_int(row.get("lvl req", "")),
                     w,
                     h,
@@ -350,22 +369,43 @@ def main() -> int:
                 )
             )
 
-    # 排序：品质 → 分组 → 需求等级 → 名字
-    items.sort(key=lambda r: (r[4], r[5], r[6], r[2]))
+    # 追加一件**空白黄金小护符**：无属性、无级别限制，用来当"空白底子"。
+    #
+    # 为什么用黄金（稀有）而不是暗金：暗金物品的名字由暗金表的行决定，
+    # 借用任何一行都会显示成那件暗金的名字（比如"毁灭"）；稀有物品没有
+    # 名字表行，没洗出前后缀时游戏就显示底材名"小护符"，不会冒名。
+    items.append(
+        (
+            "custom:charm",
+            0,
+            BLANK_CHARM_NAME,
+            "cm1",
+            "黄金",
+            "护身符·小",
+            "",
+            0,
+            1,
+            1,
+            [],
+        )
+    )
+
+    # 排序：品质 → 套装名/分组 → 需求等级 → 名字
+    items.sort(key=lambda r: (r[4], r[6], r[5], r[2]))
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     header = ["id", "file_index", "name_key", "code", "quality", "group",
-              "required_level", "width", "height", "stats"]
+              "set_name", "required_level", "width", "height", "stats"]
     out_lines = ["\t".join(header)]
-    for rid, file_index, name_key, code, quality, group, req, w, h, stats in items:
+    for rid, file_index, name_key, code, quality, group, set_name, req, w, h, stats in items:
         stat_src = ",".join(f"{s}:{v}:{l}" for s, v, l in stats)
         out_lines.append(
             "\t".join([rid, str(file_index), name_key, code, quality, group,
-                       str(req), str(w), str(h), stat_src])
+                       set_name, str(req), str(w), str(h), stat_src])
         )
     OUT.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
 
-    total_stats = sum(len(r[9]) for r in items)
+    total_stats = sum(len(r[10]) for r in items)
     print(f"条目 {len(items)} 条（暗金 {sum(1 for r in items if r[4] == '暗金')}、"
           f"套装 {sum(1 for r in items if r[4] == '套装')}）")
     print(f"属性 {total_stats} 条；成功翻译 {stat_ok} 处属性代码")

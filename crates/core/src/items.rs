@@ -102,6 +102,8 @@ pub struct ItemDetail {
     pub quality: String,
     /// 品质数据里的行号（暗金/套装/劣质用）。
     pub quality_index: Option<u16>,
+    /// 自定义名字（`personalized_name`，没有则为空）。
+    pub personalized_name: String,
     /// 物品等级。
     pub level: u8,
     /// 位置模式（调试名）。
@@ -207,6 +209,37 @@ pub enum ItemEdit {
         #[serde(default)]
         layer: Option<i32>,
     },
+    /// 新增一个属性（物品上还没有该 `ID + 层` 时用这个）。
+    ///
+    /// 与 [`Self::SetStat`] 的区别：`SetStat` 的 `layer = Some(n)` 表示
+    /// "只改这一层，找不到就报错"，用来防止用户以为改好了其实多了一条；
+    /// 而"添加属性"按钮**本来就该**新增，所以单独一个操作，语义不含糊。
+    AddStat {
+        /// 物品序号。
+        index: usize,
+        /// 属性 ID。
+        stat: u16,
+        /// 数值（界面显示值，后端会换算成存档值）。
+        value: i64,
+        /// 层（参数位）。
+        #[serde(default)]
+        layer: Option<i32>,
+    },
+    /// 改变一条属性的**层**（值2 换选项时用）。
+    ///
+    /// 值2 是属性语义的一部分（技能 ID、职业行号），换了它就是换了一个属性。
+    /// 之前界面直接发 `SetStat` 带新层，而 `SetStat` 找不到就报错
+    /// （用户实测："修改不合法：该物品没有属性 ID 97（层 58）"）。
+    RelayerStat {
+        /// 物品序号。
+        index: usize,
+        /// 属性 ID。
+        stat: u16,
+        /// 原来的层。
+        from: i32,
+        /// 新的层。
+        to: i32,
+    },
     /// 删除一个属性。
     RemoveStat {
         /// 物品序号。
@@ -265,6 +298,16 @@ pub enum ItemEdit {
         /// 物品等级（影响部分公式）。
         #[serde(default = "default_item_level")]
         level: u8,
+    },
+    /// 给物品起自定义名字（写 `personalized_name` 并置 `PERSONALIZED` 标志）。
+    ///
+    /// 这是游戏里唯一能塞自定义文字的地方（Charsi 命名任务用的就是它）。
+    /// 游戏显示时会拼成"名字 + 's ' + 底材名"，所以它**不是**完整替换物品名。
+    RenameItem {
+        /// 物品序号。
+        index: usize,
+        /// 自定义名字（空字符串表示清除命名）。
+        name: String,
     },
     /// 整体替换物品的属性列表（物品导入用）。
     ReplaceStats {
@@ -383,6 +426,7 @@ impl EditSession {
             code: item.code.to_string(),
             quality: format!("{:?}", item.quality),
             quality_index: item.quality_data.as_ref().and_then(|q| q.file_index()),
+            personalized_name: item.personalized_name.clone(),
             level: item.level,
             mode: format!("{:?}", p.mode),
             body_location: format!("{:?}", p.body_location),
@@ -706,6 +750,60 @@ impl EditSession {
                 let item = self.item_mut_on(target, *index)?;
                 set_stat_on(&mut item.stats, StatId(*stat), *value, *layer)?;
             }
+            ItemEdit::AddStat {
+                index,
+                stat,
+                value,
+                layer,
+            } => {
+                let item = self.item_mut_on(target, *index)?;
+                let id = StatId(*stat);
+                let wanted = layer.unwrap_or(0);
+                // 已经有同一 `ID + 层` 就覆盖，避免加出两条一模一样的
+                match item
+                    .stats
+                    .iter_mut()
+                    .find(|s| s.id == id && s.layer == wanted)
+                {
+                    Some(existing) => existing.value = *value,
+                    None => item.stats.push(Stat {
+                        id,
+                        value: *value,
+                        layer: wanted,
+                    }),
+                }
+            }
+            ItemEdit::RelayerStat {
+                index,
+                stat,
+                from,
+                to,
+            } => {
+                let item = self.item_mut_on(target, *index)?;
+                let id = StatId(*stat);
+                let Some(pos) = item
+                    .stats
+                    .iter()
+                    .position(|s| s.id == id && s.layer == *from)
+                else {
+                    return Err(EditError::Invalid(format!(
+                        "该物品没有属性 ID {}（层 {from}）",
+                        id.0
+                    )));
+                };
+                if from == to {
+                    return Ok(());
+                }
+                let value = item.stats[pos].value;
+                // 目标层已经有同 ID 的记录：合并成一条，避免留下两个同 ID 同层
+                if let Some(existing) = item.stats.iter_mut().find(|s| s.id == id && s.layer == *to)
+                {
+                    existing.value = value;
+                    item.stats.remove(pos);
+                } else {
+                    item.stats[pos].layer = *to;
+                }
+            }
             ItemEdit::RemoveStat { index, stat, layer } => {
                 let item = self.item_mut_on(target, *index)?;
                 let id = StatId(*stat);
@@ -784,6 +882,24 @@ impl EditSession {
                     })
                     .collect();
                 self.file.save.items.push(item);
+            }
+            ItemEdit::RenameItem { index, name } => {
+                let item = self.item_mut_on(target, *index)?;
+                let trimmed = name.trim().to_string();
+                if trimmed.is_empty() {
+                    // 清除命名：名字清空 + 去掉标志位，否则会写出一个空字符串段
+                    item.personalized_name.clear();
+                    item.flags.remove(d2s::ItemFlags::PERSONALIZED);
+                } else {
+                    // D2 的命名有长度上限，超长会被截断成乱码，这里先行拦住
+                    if trimmed.chars().count() > 15 {
+                        return Err(EditError::Invalid(
+                            "名字最多 15 个字符（游戏本身的限制）".to_string(),
+                        ));
+                    }
+                    item.personalized_name = trimmed;
+                    item.flags.insert(d2s::ItemFlags::PERSONALIZED);
+                }
             }
             ItemEdit::ReplaceStats { index, stats } => {
                 let list: Vec<Stat> = stats
@@ -980,6 +1096,17 @@ fn build_item(
                 file_index: file_index
                     .ok_or_else(|| EditError::Invalid("套装物品必须指定表行索引".to_string()))?,
             });
+        }
+        // 稀有（黄金）：名字由前后缀表组合，不洗词缀时游戏显示底材名。
+        // 前后缀全给 0，就是一件**没有词缀的黄金物品**，用来当空白底子。
+        "黄金" | "稀有" | "Rare" => {
+            item.quality = d2s::ItemQuality::Rare;
+            item.quality_data = Some(d2s::QualityData::RareCraft(d2s::RareCraftData {
+                name_prefix: 0,
+                name_suffix: 0,
+                prefixes: [0; 3],
+                suffixes: [0; 3],
+            }));
         }
         "普通" | "Normal" | "" => {
             item.quality = d2s::ItemQuality::Normal;
