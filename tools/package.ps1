@@ -12,7 +12,7 @@
       1) 生成/刷新数据包     tools/make-bundle.py
       2) 构建前端            web: npm run build
       3) release 构建        desktop/src-tauri: cargo build --release
-      4) 组装并压缩          dist/d2r-save-editor-<版本>-win-x64.zip
+      4) 组装并压缩          dist/D2RSaveEditor.zip
 
     注意：release 构建在缺少数据包时会**直接失败**（见 crates/app/build.rs），
     避免发出一个打开就没数据的包。
@@ -138,7 +138,7 @@ Ok "d2r-desktop.exe（$exeMb MB）"
 
 # 4) 产出单文件 exe（数据与界面资源都在里面，配套一份说明）
 Step '产出单文件 exe'
-$outName = "D2RSaveEditor-win-x64.exe"
+$outName = "D2RSaveEditor.exe"
 $outExe = Join-Path $dist $outName
 Copy-Item $exe $outExe -Force
 $outMb = [math]::Round((Get-Item $outExe).Length / 1MB, 1)
@@ -206,16 +206,16 @@ Ok "使用说明.txt"
 
 if ($AlsoZip) {
     Step '另外打一个 zip（含 exe 与说明）'
-    $stage = Join-Path $dist "d2r-save-editor-win-x64"
+    $stage = Join-Path $dist "D2RSaveEditor"
     if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $stage | Out-Null
-    Copy-Item $outExe (Join-Path $stage 'd2r-save-editor.exe')
+    Copy-Item $outExe (Join-Path $stage 'D2RSaveEditor.exe')
     Copy-Item $usagePath $stage
     foreach ($doc in 'README.md', 'LICENSE') {
         $src = Join-Path $repo $doc
         if (Test-Path $src) { Copy-Item $src $stage }
     }
-    $zip = Join-Path $dist "d2r-save-editor-win-x64.zip"
+    $zip = Join-Path $dist "D2RSaveEditor.zip"
     if (Test-Path $zip) { Remove-Item $zip -Force }
     Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
     Ok "$([System.IO.Path]::GetFileName($zip))（$([math]::Round((Get-Item $zip).Length/1MB,1)) MB）"
