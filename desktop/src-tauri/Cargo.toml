@@ -1,7 +1,7 @@
 [package]
 name = "d2r-desktop"
 description = "D2R 存档编辑器桌面端（Tauri v2）"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT"

@@ -428,7 +428,10 @@ impl Workspace {
             .and_then(d2r_data::skilltree::trees_for_class)
         else {
             return Ok(SkillsViewDto {
-                class_code: class_code.as_deref().map(class_short_zh).unwrap_or_default(),
+                class_code: class_code
+                    .as_deref()
+                    .map(class_short_zh)
+                    .unwrap_or_default(),
                 trees: Vec::new(),
                 unclassified: all,
                 skill_points,
@@ -471,7 +474,10 @@ impl Workspace {
         }
 
         Ok(SkillsViewDto {
-            class_code: class_code.as_deref().map(class_short_zh).unwrap_or_default(),
+            class_code: class_code
+                .as_deref()
+                .map(class_short_zh)
+                .unwrap_or_default(),
             trees: trees
                 .iter()
                 .zip(grouped)
