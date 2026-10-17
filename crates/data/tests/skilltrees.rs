@@ -48,7 +48,7 @@ fn every_listed_skill_exists_in_data() {
     let mut problems = Vec::new();
     for class in CLASS_SKILL_TREES {
         for tree in class.trees {
-            for skill in tree.skills {
+            for skill in tree.skills.iter().filter(|s| !s.is_empty()) {
                 let found = rows
                     .iter()
                     .any(|(c, s)| c == class.class_code && s == skill);
@@ -116,17 +116,23 @@ fn trees_are_three_by_ten() {
             ));
         }
         for tree in class.trees {
-            if tree.skills.len() != 10 {
+            if tree.skills.iter().filter(|s| !s.is_empty()).count() != 10 {
                 problems.push(format!(
                     "{}/{}: 有 {} 个技能（应为 10）",
                     class.class_code,
                     tree.name,
-                    tree.skills.len()
+                    tree.skills.iter().filter(|s| !s.is_empty()).count()
                 ));
             }
             // 同一棵树里不能有重复
-            for (i, a) in tree.skills.iter().enumerate() {
-                if tree.skills[i + 1..].contains(a) {
+            let real: Vec<&str> = tree
+                .skills
+                .iter()
+                .copied()
+                .filter(|s| !s.is_empty())
+                .collect();
+            for (i, a) in real.iter().enumerate() {
+                if real[i + 1..].contains(a) {
                     problems.push(format!(
                         "{}/{}: 技能 {a:?} 重复",
                         class.class_code, tree.name
@@ -149,7 +155,7 @@ fn skills_belong_to_exactly_one_tree() {
     let mut problems = Vec::new();
     for class in CLASS_SKILL_TREES {
         for tree in class.trees {
-            for skill in tree.skills {
+            for skill in tree.skills.iter().filter(|s| !s.is_empty()) {
                 if let Some((c, t)) = seen
                     .iter()
                     .find(|(c, s)| *c == class.class_code && s == skill)

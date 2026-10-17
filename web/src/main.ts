@@ -200,6 +200,10 @@ function renderSkills() {
 
 /** 技能树里的一个方块：图标 + 等级输入 + 名字。 */
 function skillCell(s: SkillDto): string {
+  // 占位项（技能树里的空格）：渲染成不可见的空格子，保住 6×3 的网格形状
+  if (s.skillId === null && s.name === null) {
+    return `<div class="skill-empty"></div>`;
+  }
   const icon = skillIcons[iconCodeOf(s)] ?? "";
   const art = icon
     ? `<img src="${icon}" alt="" />`

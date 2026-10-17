@@ -483,7 +483,19 @@ impl Workspace {
                 .zip(grouped)
                 .map(|(tree, skills)| SkillTreeDto {
                     name: tree_name_zh(tree.name).to_string(),
-                    skills: skills.into_iter().flatten().collect(),
+                    // **空格也要保留**：技能树是 6 行 × 3 列的行优先网格，
+                    // 缺格用占位项填上，界面才能还原游戏里的左中右三条线。
+                    skills: skills
+                        .into_iter()
+                        .map(|slot| {
+                            slot.unwrap_or(SkillDto {
+                                index: 0,
+                                skill_id: None,
+                                name: None,
+                                level: 0,
+                            })
+                        })
+                        .collect(),
                 })
                 .collect(),
             unclassified,

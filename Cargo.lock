@@ -31,7 +31,7 @@ dependencies = [
 
 [[package]]
 name = "d2r-app"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "d2r-core",
  "d2r-data",
@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "d2r-cli"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "d2r-app",
  "d2r-core",
@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "d2r-core"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "d2s",
  "serde",
@@ -63,7 +63,7 @@ dependencies = [
 
 [[package]]
 name = "d2r-data"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "serde",
  "serde_json",

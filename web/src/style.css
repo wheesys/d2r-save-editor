@@ -702,3 +702,7 @@ body.modal-open { overflow: hidden; }
   opacity: 0.75;
 }
 
+
+/* 技能树空格：不可见，但占住网格位置，保证 6 行 x 3 列的形状 */
+.skill-empty { visibility: hidden; }
+
