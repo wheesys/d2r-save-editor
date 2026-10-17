@@ -380,6 +380,29 @@ console.log("=== 7. 新增属性一行：搜索框 + 值2 控件 ===");
   );
 }
 
+console.log("=== 8. 右键菜单与装备库导入 ===");
+{
+  const js = readFileSync(new URL("../web/src/main.ts", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
+  const inv = readFileSync(new URL("../web/src/inventory.ts", import.meta.url), "utf8");
+  check("有右键菜单容器", page.includes('id="item-menu"'));
+  check("有装备库弹窗", page.includes('id="lib-modal"') && page.includes('id="lib-items"'));
+  // 右键不再直接开属性窗，而是弹菜单
+  check(
+    "右键改为弹菜单（不再直开编辑）",
+    inv.includes("onMenu({ kind: \"item\"") && !inv.includes("onSelect(Number(el.dataset.item))"),
+  );
+  check("空白处右键也能导入", inv.includes('kind: "empty"'));
+  check("菜单里有编辑/复制/导入", js.includes("编辑属性") && js.includes("复制这件") && js.includes("从装备库导入"));
+  check("装备库有类型筛选", page.includes('id="lib-group"') && js.includes("fillLibraryGroups"));
+  check("装备库有搜索", page.includes('id="lib-search"'));
+  check("复制走后端命令", js.includes('"duplicate_item"'));
+  check("导入走后端命令", js.includes('"import_library_item"'));
+  // 装备库数据是构建期生成、内嵌、只解析一次
+  const lib = readFileSync(new URL("../crates/app/src/library.rs", import.meta.url), "utf8");
+  check("装备库解析结果有缓存", lib.includes("OnceLock"));
+}
+
 console.log("");
 if (failures === 0) {
   console.log("全部通过：容器划分、像素位置、越界处理、图标回退、装备槽都符合预期。");

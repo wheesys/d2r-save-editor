@@ -23,6 +23,7 @@ import {
   type BundleInfo,
   type ItemDetailDto,
   type StatCatalogEntry,
+  type LibraryItemDto,
   type QuestDifficultyDto,
   type QuestState,
   type LayoutSettings,
@@ -345,6 +346,7 @@ function renderContainerView() {
     host,
     currentLayout,
     items,
+    // 左键只做选中（属性窗由右键菜单里的"编辑"打开）
     (index) => void selectItem(index),
     async (index, page, col, row) => {
       try {
@@ -353,13 +355,15 @@ function renderContainerView() {
         });
         toast(`已移动（${n} 条修改）。点「保存」写入文件。`);
         await loadAll();
-        await selectItem(index);
+        // 只刷新列表，不打开属性窗（拖完就弹窗很烦）
       } catch (e) {
         showError(e, "移动被拒绝");
       }
     },
+    (target, x, y) => showItemMenu(target, x, y),
   );
   $("#inventory-section").classList.remove("hidden");
+  bindItemMenu();
 }
 
 /** 存储页中文缩写 */
@@ -1385,6 +1389,14 @@ function bind() {
 
   $("#btn-quests-all").addEventListener("click", () => void completeAllQuests());
 
+  // 装备库导入弹窗（搜索 / 类型筛选 / 导入 / 关闭）
+  $("#btn-lib-import").addEventListener("click", () => void importLibraryNow());
+  $("#lib-search").addEventListener("input", renderLibraryItems);
+  $("#lib-group").addEventListener("change", renderLibraryItems);
+  document.querySelectorAll("[data-close-lib]").forEach((el) => {
+    el.addEventListener("click", () => $("#lib-modal").classList.add("hidden"));
+  });
+
   // 页签切换
   document.querySelectorAll<HTMLButtonElement>("#tabs .tab").forEach((btn) => {
     btn.addEventListener("click", () => activateTab(btn.dataset.tab ?? "char"));
@@ -1555,3 +1567,188 @@ window.addEventListener("DOMContentLoaded", async () => {
     showError(e, "读取数据集失败（保存仍可用，界面名字会退化为代码）");
   }
 });
+
+/** 右键菜单的目标与当前选中的装备库条目。 */
+type ItemMenuTarget =
+  | { kind: "item"; index: number }
+  | { kind: "empty"; page: string };
+
+let menuTarget: ItemMenuTarget | null = null;
+let libraryItems: LibraryItemDto[] = [];
+let librarySelected: string | null = null;
+
+/** 关掉右键菜单（点别处、按 Esc 之外的任何操作都会关）。 */
+function hideItemMenu() {
+  $("#item-menu").classList.add("hidden");
+}
+
+/**
+ * 弹出右键菜单。
+ *
+ * 物品上：编辑 / 复制 / 导入。
+ * 空白处：只有导入（装备库 / 本地文件）——用户明确要求"空白地方右键"能导入。
+ */
+function showItemMenu(target: ItemMenuTarget, x: number, y: number) {
+  menuTarget = target;
+  const menu = $("#item-menu");
+  const entries =
+    target.kind === "item"
+      ? [
+          { label: "编辑属性", action: () => void selectItem(target.index) },
+          { label: "复制这件", action: () => void duplicateItemNow(target.index) },
+          { label: "从装备库导入…", action: () => void openLibrary() },
+          { label: "从文件导入…", action: () => void importFromFile() },
+        ]
+      : [
+          { label: "从装备库导入…", action: () => void openLibrary() },
+          { label: "从文件导入…", action: () => void importFromFile() },
+        ];
+  menu.innerHTML = entries
+    .map(
+      (e, i) =>
+        `<button class="ctx-item" data-ctx="${i}">${escapeHtml(e.label)}</button>`,
+    )
+    .join("");
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  menu.classList.remove("hidden");
+  menu.querySelectorAll<HTMLButtonElement>("button[data-ctx]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      hideItemMenu();
+      entries[Number(btn.dataset.ctx)].action();
+    });
+  });
+}
+
+/** 全局关闭菜单：点别处 / 滚轮 / 窗口变化。 */
+function bindItemMenu() {
+  document.addEventListener("click", (ev) => {
+    if (!(ev.target as HTMLElement | null)?.closest("#item-menu")) hideItemMenu();
+  });
+  window.addEventListener("blur", hideItemMenu);
+}
+
+/** 复制一件物品到空位。 */
+async function duplicateItemNow(index: number) {
+  try {
+    const r = await call<{ index: number; col: number; row: number }>("duplicate_item", {
+      index,
+    });
+    toast(`已复制到 (${r.col}, ${r.row})。点「保存」才写入文件。`);
+    await loadAll();
+  } catch (e) {
+    showError(e, "复制被拒绝");
+  }
+}
+
+/** 打开装备库（第一次会从后端取，之后用缓存数组）。 */
+async function openLibrary() {
+  $("#lib-modal").classList.remove("hidden");
+  $("#lib-detail").textContent = "";
+  if (libraryItems.length === 0) {
+    $("#lib-items").innerHTML = `<div class="muted">正在读取装备库…</div>`;
+    try {
+      libraryItems = await call<LibraryItemDto[]>("item_library");
+    } catch (e) {
+      showError(e, "读取装备库失败");
+      return;
+    }
+  }
+  fillLibraryGroups();
+  renderLibraryItems();
+}
+
+/** 填"按类型筛选"下拉：品质·分组。 */
+function fillLibraryGroups() {
+  const groups = new Set<string>();
+  for (const it of libraryItems) groups.add(`${it.quality}·${it.group}`);
+  const sel = $("#lib-group") as HTMLSelectElement;
+  const previous = sel.value;
+  sel.innerHTML =
+    `<option value="">全部类型</option>` +
+    [...groups]
+      .sort()
+      .map((g) => `<option value="${escapeAttr(g)}">${escapeHtml(g)}</option>`)
+      .join("");
+  if ([...groups].includes(previous)) sel.value = previous;
+}
+
+/** 按筛选条件渲染条目列表。 */
+function renderLibraryItems() {
+  const keyword = ($("#lib-search") as HTMLInputElement).value.trim().toLowerCase();
+  const group = ($("#lib-group") as HTMLSelectElement).value;
+  const matched = libraryItems.filter((it) => {
+    if (group && `${it.quality}·${it.group}` !== group) return false;
+    if (keyword === "") return true;
+    return it.name.toLowerCase().includes(keyword) || it.code.includes(keyword);
+  });
+  $("#lib-count").textContent = `${matched.length} / ${libraryItems.length} 件`;
+  $("#lib-items").innerHTML = matched
+    .map(
+      (it) =>
+        `<button class="lib-item${it.id === librarySelected ? " selected" : ""}" data-lib="${escapeAttr(it.id)}">
+           <span class="lib-name">${escapeHtml(it.name)}</span>
+           <span class="lib-meta">${it.width}×${it.height}｜需${it.requiredLevel}级｜${it.stats.length} 条属性</span>
+         </button>`,
+    )
+    .join("");
+  $("#lib-items")
+    .querySelectorAll<HTMLButtonElement>("button[data-lib]")
+    .forEach((btn) => {
+      btn.addEventListener("click", () => {
+        librarySelected = btn.dataset.lib ?? null;
+        renderLibraryItems();
+        const item = libraryItems.find((i) => i.id === librarySelected);
+        if (item) {
+          $("#lib-detail").textContent =
+            `${item.name}（${item.code}）｜${item.quality}·${item.group}｜` +
+            `占 ${item.width}×${item.height}｜需求等级 ${item.requiredLevel}｜属性 ${item.stats.length} 条`;
+        }
+        $("#btn-lib-import").toggleAttribute("disabled", !librarySelected);
+      });
+    });
+  $("#btn-lib-import").toggleAttribute("disabled", !librarySelected);
+}
+
+/** 把装备库选中项导入到当前容器（物品上右键时用它的容器，空白处用所在容器）。 */
+async function importLibraryNow() {
+  if (!librarySelected) return;
+  const page = menuTarget?.kind === "empty" ? menuTarget.page : "Inventory";
+  try {
+    const r = await call<{ index: number; name: string; stats: number; col: number; row: number }>(
+      "import_library_item",
+      { id: librarySelected, storePage: page },
+    );
+    toast(`已导入「${r.name}」（${r.stats} 条属性）到 (${r.col}, ${r.row})。点「保存」才写入文件。`);
+    $("#lib-modal").classList.add("hidden");
+    await loadAll();
+  } catch (e) {
+    showError(e, "导入被拒绝");
+  }
+}
+
+/** 从本地文件导入（沿用已有的蓝图导入：选文件 + 指定模板）。 */
+async function importFromFile() {
+  const path = await openDialog({
+    multiple: false,
+    filters: [{ name: "物品蓝图", extensions: ["json"] }],
+  });
+  if (typeof path !== "string") return;
+  // 模板：用当前存档里第一件物品当形状参考（蓝图会整体覆盖属性）
+  const template = items.length > 0 ? items[0].index : null;
+  if (template === null) {
+    toast("存档里至少要有一件物品当模板", "error");
+    return;
+  }
+  try {
+    const json = await call<string>("read_blueprint", { path });
+    const out = await call<{ index: number }>("import_item", {
+      blueprintJson: json,
+      template,
+    });
+    toast(`已从文件导入（序号 ${out.index}）。点「保存」才写入文件。`);
+    await loadAll();
+  } catch (e) {
+    showError(e, "从文件导入失败");
+  }
+}

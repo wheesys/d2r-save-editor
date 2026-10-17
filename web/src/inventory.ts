@@ -266,6 +266,11 @@ function renderGrid(spec: GridSpec, items: ItemDto[], selected: number | null): 
 }
 
 /** 渲染全部容器 */
+/** 右键菜单的目标：点在某件物品上，还是点在空白处（用于导入）。 */
+export type MenuTarget =
+  | { kind: "item"; index: number }
+  | { kind: "empty"; page: string };
+
 export function renderInventory(layout: LayoutSettings, items: ItemDto[], selected: number | null): string {
   const grids = buildGrids(layout, items);
   return grids.map((g) => renderGrid(g, items, selected)).join("");
@@ -364,17 +369,17 @@ export function bindGridDrag(
   root: HTMLElement,
   layout: LayoutSettings,
   items: ItemDto[],
-  onSelect: (index: number) => void,
+  /** 保留参数以兼容调用方；选中/编辑改由右键菜单触发 */
+  _onSelect: (index: number) => void,
   onMove: (index: number, page: string, col: number, row: number) => void,
+  onMenu: (target: MenuTarget, x: number, y: number) => void,
 ) {
   root.querySelectorAll<HTMLElement>(".blk[data-item]").forEach((el) => {
-    // **右键**打开属性弹窗，左键留给拖拽。
-    //
-    // 以前是左键打开，结果"拖完一松手就弹出属性窗"（用户反馈）。
-    // 拖拽本来就用左键按住，所以两者用不同按键彻底分开。
+    // **右键弹菜单**（编辑 / 复制 / 导入），不再直接打开属性窗。
+    // 直接开窗会让"想复制却开了编辑"这类误操作很烦，菜单里再选更明确。
     el.addEventListener("contextmenu", (ev) => {
       ev.preventDefault();
-      onSelect(Number(el.dataset.item));
+      onMenu({ kind: "item", index: Number(el.dataset.item) }, ev.clientX, ev.clientY);
     });
     // **不要设 `draggable`**：WebView2 里设了它的元素会把 click 吞掉，
     // 表现就是"背包里的物品点不开属性弹窗"（身上的装备在 .doll 里不受影响）。
@@ -382,10 +387,24 @@ export function bindGridDrag(
     el.removeAttribute("draggable");
   });
 
+  // 越界物品（列在容器外的那些）同样走右键菜单
   root.querySelectorAll<HTMLElement>(".oob-item").forEach((el) => {
     el.addEventListener("contextmenu", (ev) => {
       ev.preventDefault();
-      onSelect(Number(el.dataset.item));
+      onMenu({ kind: "item", index: Number(el.dataset.item) }, ev.clientX, ev.clientY);
+    });
+  });
+
+  // 空白处右键 → 菜单里只有「导入」（装备库 / 本地文件）
+  root.querySelectorAll<HTMLElement>(".grid").forEach((grid) => {
+    if (grid.classList.contains("doll")) return;
+    grid.addEventListener("contextmenu", (ev) => {
+      // 点在物品块上时交给物品自己的监听
+      if ((ev.target as HTMLElement | null)?.closest(".blk[data-item]")) return;
+      ev.preventDefault();
+      const wrap = grid.closest(".grid-wrap") as HTMLElement | null;
+      const page = wrap?.dataset.grid ?? "Inventory";
+      onMenu({ kind: "empty", page }, ev.clientX, ev.clientY);
     });
   });
 

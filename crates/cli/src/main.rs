@@ -34,6 +34,8 @@ fn main() -> ExitCode {
         "skill-trees" => cmd_skill_trees(&args[1..]),
         "export-items" => cmd_export_items(&args[1..]),
         "import-item" => cmd_import_item(&args[1..]),
+        "library" => cmd_library(&args[1..]),
+        "import-library" => cmd_import_library(&args[1..]),
         "-h" | "--help" | "help" => {
             usage();
             ExitCode::SUCCESS
@@ -1827,4 +1829,93 @@ fn find_ci(dir: &Path, stem: &str) -> Option<PathBuf> {
                 .map(|s| s.eq_ignore_ascii_case(&wanted))
                 .unwrap_or(false)
         })
+}
+
+/// 列出内置装备库（暗金 / 套装），可按关键字与类型过滤。
+fn cmd_library(args: &[String]) -> ExitCode {
+    let filter = arg_of(args, "--filter").map(|f| f.to_lowercase());
+    let group = arg_of(args, "--group");
+    let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    let items = ws.item_library();
+    let matched: Vec<_> = items
+        .iter()
+        .filter(|i| match &filter {
+            Some(f) => i.name.to_lowercase().contains(f) || i.code.contains(f.as_str()),
+            None => true,
+        })
+        .filter(|i| match &group {
+            Some(g) => &i.group == g,
+            None => true,
+        })
+        .collect();
+    println!("装备库共 {} 条，匹配 {} 条", items.len(), matched.len());
+    let mut last_group = String::new();
+    for it in matched.iter().take(usize::MAX) {
+        let head = format!("{}·{}", it.quality, it.group);
+        if head != last_group {
+            println!("\n[{head}]");
+            last_group = head;
+        }
+        println!(
+            "  {:<26} {:<6} 需{}级 {}x{} 属性{}条  id={}",
+            it.name,
+            it.code,
+            it.required_level,
+            it.width,
+            it.height,
+            it.stats.len(),
+            it.id
+        );
+    }
+    ExitCode::SUCCESS
+}
+
+/// 从内置装备库导入一件物品到指定容器。
+fn cmd_import_library(args: &[String]) -> ExitCode {
+    let Some(target) = args.iter().find(|a| !a.starts_with("--")) else {
+        eprintln!("用法: d2r import-library <文件.d2s> <装备库id> [--page Inventory] [--out 文件]");
+        return ExitCode::FAILURE;
+    };
+    let Some(id) = args
+        .iter()
+        .skip_while(|a| *a != target)
+        .skip(1)
+        .find(|a| !a.starts_with("--"))
+    else {
+        eprintln!("缺少装备库 id（先用 d2r library 查）");
+        return ExitCode::FAILURE;
+    };
+    let page = arg_of(args, "--page").unwrap_or_else(|| "Inventory".to_string());
+    let out = arg_of(args, "--out");
+    let mut ws = d2r_app::Workspace::new(d2r_app::default_game_dir());
+    match ws.open(target) {
+        Ok(_) => {}
+        Err(e) => {
+            eprintln!("打开失败: {e}");
+            return ExitCode::FAILURE;
+        }
+    }
+    match ws.import_library_item(id, &page) {
+        Ok(r) => {
+            println!(
+                "已导入: {}（属性 {} 条）→ 序号 {} 位置 ({}, {})",
+                r.name, r.stats, r.index, r.col, r.row
+            );
+            match out {
+                Some(path) => match ws.save(Some(std::path::PathBuf::from(&path))) {
+                    Ok(_) => println!("已保存: {path}"),
+                    Err(e) => {
+                        eprintln!("保存失败: {e}");
+                        return ExitCode::FAILURE;
+                    }
+                },
+                None => println!("（未写盘：加 --out <文件> 才会保存）"),
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("导入失败: {e}");
+            ExitCode::FAILURE
+        }
+    }
 }

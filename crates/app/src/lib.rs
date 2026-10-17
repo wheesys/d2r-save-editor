@@ -15,10 +15,12 @@
 pub mod bundle;
 pub mod config;
 pub mod dto;
+pub mod library;
 pub mod workspace;
 
 pub use bundle::BundleInfo;
 pub use config::{ConfigStore, Settings};
 pub use dto::*;
+pub use library::{LibraryItem, LibraryStat};
 pub use workspace::StatCatalogEntry;
 pub use workspace::{default_game_dir, find_strings_dir, SaveOutcome, Workspace};

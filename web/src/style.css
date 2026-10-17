@@ -485,3 +485,55 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
   font-size: 12px;
 }
 .cell-select:focus { border-color: var(--accent); outline: none; }
+
+/* 右键菜单 */
+.ctx-menu {
+  position: fixed;
+  z-index: 900;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ctx-item {
+  text-align: left;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+.ctx-item:hover { background: var(--accent); color: #111; }
+
+/* 装备库列表 */
+.lib-items {
+  max-height: 380px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+.lib-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--fg);
+  cursor: pointer;
+}
+.lib-item:hover { border-color: var(--accent); }
+.lib-item.selected { border-color: var(--accent); background: var(--panel-2); }
+.lib-name { font-size: 13px; }
+.lib-meta { font-size: 11px; color: var(--muted); }

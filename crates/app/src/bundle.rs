@@ -149,6 +149,13 @@ pub fn excel_table(name: &str) -> Option<String> {
     text_of(&format!("excel/{name}.txt"))
 }
 
+/// 装备库数据（`library/items.tsv`，由 `tools/make-library.py` 生成并内嵌）。
+///
+/// 返回原始文本，由 `crate::library` **解析一次后缓存**——不要每个调用方自己解析。
+pub fn library_text() -> Option<String> {
+    text_of("library/items.tsv")
+}
+
 /// 文本表的全部内容（文件名 → 文本）。
 pub fn string_files() -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = embedded::FILES

@@ -49,6 +49,9 @@ pub fn run() {
         // （此前有一个 `D2R_OPEN_SAVE` 环境变量开关，为截图核对方便而加，已移除。）
         .invoke_handler(tauri::generate_handler![
             commands::dataset_info,
+            commands::item_library,
+            commands::import_library_item,
+            commands::duplicate_item,
             commands::open_save,
             commands::is_dirty,
             commands::character,

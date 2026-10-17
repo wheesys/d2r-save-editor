@@ -263,3 +263,34 @@ pub fn versions() -> serde_json::Value {
         "tauri": tauri::VERSION,
     })
 }
+
+
+/// 内置装备库（暗金 / 套装）。第一次调用后走后端缓存，不会重复解析。
+#[tauri::command]
+pub fn item_library(state: State<'_, AppState>) -> Vec<d2r_app::LibraryItem> {
+    state.0.lock().unwrap().item_library()
+}
+
+/// 从内置装备库导入一件物品到指定容器（自动找空位）。
+#[tauri::command]
+pub fn import_library_item(
+    state: State<'_, AppState>,
+    id: String,
+    store_page: String,
+) -> R<d2r_app::library::ImportResult> {
+    state.0.lock().unwrap().import_library_item(&id, &store_page)
+}
+
+/// 复制一件物品到同容器的空位（序号会变，返回新序号）。
+#[tauri::command]
+pub fn duplicate_item(
+    state: State<'_, AppState>,
+    index: usize,
+    store_page: Option<String>,
+) -> R<d2r_app::library::ImportResult> {
+    state
+        .0
+        .lock()
+        .unwrap()
+        .duplicate_item(index, store_page.as_deref())
+}

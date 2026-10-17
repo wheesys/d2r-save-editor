@@ -866,6 +866,185 @@ impl Workspace {
         Ok(())
     }
 
+    /// 内置装备库（暗金 / 套装）。**第一次调用后走缓存**，不会重复解析。
+    ///
+    /// 显示名在生成期就本地化进数据了（`tools/make-library.py`），
+    /// 所以这里不需要再查名字表——数据由 `tools/make-library.py` 产出，
+    /// 随数据包内嵌，与语言设置无关。
+    pub fn item_library(&mut self) -> Vec<crate::library::LibraryItem> {
+        let lang = self.lang.clone();
+        crate::library::items(&lang, &mut |key| Some(key.to_string()))
+    }
+
+    /// 从装备库导入一件物品到指定容器，自动找空位。
+    ///
+    /// 与蓝图导入的区别：不要求存档里已有同类物品当模板——这是从零构造，
+    /// 所以能导入存档里原本没有的暗金/套装。
+    pub fn import_library_item(
+        &mut self,
+        id: &str,
+        store_page: &str,
+    ) -> Result<crate::library::ImportResult, AppError> {
+        let items = self.item_library();
+        let entry = items
+            .iter()
+            .find(|i| i.id == id)
+            .ok_or_else(|| AppError::invalid(format!("装备库里没有这一项：{id}")))?;
+        // 属性也要按位宽先行拦一道，避免写进一个会被截断的值
+        for s in &entry.stats {
+            self.stat_limits
+                .check(s.stat, s.value)
+                .map_err(AppError::invalid)?;
+        }
+        let stats: Vec<(u16, i64, i32)> = entry
+            .stats
+            .iter()
+            .map(|s| (s.stat, s.value, s.layer))
+            .collect();
+        let code = entry.code.clone();
+        let quality = entry.quality.clone();
+        let file_index = entry.file_index;
+        let name = entry.name.clone();
+        let level = entry.required_level.clamp(1, 99) as u8;
+
+        let (col, row) = self.find_free_slot(store_page, entry.width, entry.height)?;
+        let before = self.session()?.item_count();
+        self.session_mut()?
+            .apply_item(d2r_core::ItemEdit::CreateItem {
+                code,
+                quality,
+                file_index: Some(file_index),
+                stats: stats.clone(),
+                store_page: store_page.to_string(),
+                col,
+                row,
+                level,
+            })
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Ok(crate::library::ImportResult {
+            index: before,
+            name,
+            stats: stats.len(),
+            col,
+            row,
+        })
+    }
+    /// 复制一件物品到同容器的空位。
+    ///
+    /// 用 `CloneItem`（复制整条记录）而不是重新构造：复制要**连品质数据、
+    /// 镶孔、耐久一起带过来**，重建反而容易丢东西。
+    /// 位置由 [`Self::find_free_slot`] 自动挑，用户不用自己算坐标。
+    pub fn duplicate_item(
+        &mut self,
+        index: usize,
+        store_page: Option<&str>,
+    ) -> Result<crate::library::ImportResult, AppError> {
+        let size_map = crate::bundle::item_size_map();
+        let (page, w, h, name) = {
+            let details = self.session()?.item_details();
+            let src = details
+                .get(index)
+                .ok_or_else(|| AppError::invalid(format!("物品序号 {index} 越界")))?;
+            let (iw, ih) = self.layout.item_size(
+                &src.code,
+                size_map.get(&src.code).copied().unwrap_or((1, 1)),
+            );
+            (
+                store_page
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| src.store_page.clone()),
+                iw,
+                ih,
+                src.code.clone(),
+            )
+        };
+        let (col, row) = self.find_free_slot(&page, w, h)?;
+        let before = self.session()?.item_count();
+        self.session_mut()?
+            .apply_item(d2r_core::ItemEdit::CloneItem { template: index })
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        // 克隆出来的记录带的是原物品的位置，要挪到新空位
+        self.session_mut()?
+            .apply_item(d2r_core::ItemEdit::MoveTo {
+                index: before,
+                col,
+                row,
+            })
+            .map_err(|e| AppError::invalid(e.to_string()))?;
+        Ok(crate::library::ImportResult {
+            index: before,
+            name,
+            stats: 0,
+            col,
+            row,
+        })
+    }
+
+    /// 在指定容器里找一块能放下 `w × h` 的空位。
+    ///
+    /// 用于"从装备库导入"：用户不该自己算坐标，程序挑第一个能放下的位置。
+    /// 算法是**按行扫描、逐格检查**：把已占格标记出来，再找连续空位。
+    /// 返回第一个可放位置；放不下则报错（而不是塞到重叠的位置上）。
+    fn find_free_slot(&mut self, store_page: &str, w: u32, h: u32) -> Result<(u8, u8), AppError> {
+        // 容器尺寸：背包/方块/箱子各自的列数、行数
+        let (cols, rows) = match store_page {
+            "Cube" => (self.layout.cube_cols, self.layout.cube_rows),
+            "Stash" => (self.layout.stash_cols, self.layout.stash_rows),
+            // 腰带按物品数量算，不是格子；装备页由固定槽位决定，都不做自动放置
+            "Belt" | "Equip" => {
+                return Err(AppError::invalid(
+                    "腰带与装备页不支持自动放置，请导入到背包后手动移动".to_string(),
+                ));
+            }
+            _ => (self.layout.inventory_cols, self.layout.inventory_rows),
+        };
+        let cols = cols.max(1);
+        let rows = rows.max(1);
+        if w > cols || h > rows {
+            return Err(AppError::invalid(format!(
+                "这件物品占 {w}×{h}，容器只有 {cols}×{rows}，放不下"
+            )));
+        }
+
+        // 标记已占格：同容器里每件物品按它的占格涂一遍
+        let size_map = crate::bundle::item_size_map();
+        let occupied: Vec<Vec<bool>> = {
+            let details = self.session()?.item_details();
+            let mut grid = vec![vec![false; cols as usize]; rows as usize];
+            for d in &details {
+                if d.store_page != store_page {
+                    continue;
+                }
+                let (iw, ih) = self
+                    .layout
+                    .item_size(&d.code, size_map.get(&d.code).copied().unwrap_or((1, 1)));
+                for y in d.inv_y..d.inv_y.saturating_add(ih as u8) {
+                    for x in d.inv_x..d.inv_x.saturating_add(iw as u8) {
+                        if let Some(row) = grid.get_mut(y as usize) {
+                            if let Some(cell) = row.get_mut(x as usize) {
+                                *cell = true;
+                            }
+                        }
+                    }
+                }
+            }
+            grid
+        };
+
+        for y in 0..=(rows - h) {
+            for x in 0..=(cols - w) {
+                let fits = (0..h)
+                    .all(|dy| (0..w).all(|dx| !occupied[(y + dy) as usize][(x + dx) as usize]));
+                if fits {
+                    return Ok((x as u8, y as u8));
+                }
+            }
+        }
+        Err(AppError::invalid(format!(
+            "{store_page} 里没有 {w}×{h} 的空位，先挪开一些物品再试"
+        )))
+    }
+
     /// 按当前布局设置做越界校验（尺寸来自内置数据包 + mod 覆盖）。
     pub fn validate_bounds(&self) -> Result<Vec<d2r_core::BoundsIssue>, AppError> {
         let session = self.session()?;

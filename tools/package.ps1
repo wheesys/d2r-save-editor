@@ -103,7 +103,12 @@ if (-not (Test-Path $bundleMarker)) {
     throw "数据包不存在：$bundleMarker —— release 构建会失败"
 }
 $bundleMb = [math]::Round(((Get-ChildItem (Split-Path $bundleMarker) -Recurse -File | Measure-Object -Sum Length).Sum / 1MB), 2)
-Ok "资源包就绪（$bundleMb MB）"
+# 装备库：构建期把它整理成一份数据随包内嵌，运行时不解析原始表
+    & $py (Join-Path $repo 'tools/make-library.py')
+    if ($LASTEXITCODE -ne 0) { throw '装备库生成失败' }
+    Ok "装备库就绪（library/items.tsv）"
+
+    Ok "资源包就绪（$bundleMb MB）"
 
 # 2) 前端
 if (-not $SkipFrontend) {

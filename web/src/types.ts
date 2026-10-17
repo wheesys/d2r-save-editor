@@ -272,3 +272,20 @@ export interface SkillsViewDto {
   /** 技能 ID → 英文技能名（按名字找图标用） */
   englishNames: Record<string, string>;
 }
+
+/** 装备库里的一条物品（暗金 / 套装）。 */
+export interface LibraryItemDto {
+  id: string;
+  fileIndex: number;
+  nameKey: string;
+  /** 显示名（生成期已本地化） */
+  name: string;
+  code: string;
+  quality: string;
+  group: string;
+  requiredLevel: number;
+  width: number;
+  height: number;
+  stats: { stat: number; value: number; layer: number }[];
+}
+

@@ -236,5 +236,28 @@
 
     <div id="toast" class="toast hidden"></div>
     <script type="module" src="/src/main.ts"></script>
+  <!-- 右键菜单：物品 / 空白处 -->
+  <div id="item-menu" class="ctx-menu hidden"></div>
+
+  <!-- 从装备库导入（按类型分组 + 搜索） -->
+  <div id="lib-modal" class="modal hidden">
+    <div class="modal-box wide">
+      <div class="modal-head">
+        <h2>从装备库导入</h2>
+        <button data-close-lib>关闭 ✕</button>
+      </div>
+      <div class="add-stat">
+        <input id="lib-search" type="text" placeholder="搜索名字…" />
+        <select id="lib-group" title="按类型筛选"></select>
+        <span id="lib-count" class="muted"></span>
+      </div>
+      <div id="lib-items" class="lib-items"></div>
+      <div id="lib-detail" class="muted"></div>
+      <div class="actions">
+        <button id="btn-lib-import" class="primary" disabled>导入这件</button>
+      </div>
+    </div>
+  </div>
+
   </body>
 </html>

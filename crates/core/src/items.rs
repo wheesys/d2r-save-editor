@@ -238,6 +238,34 @@ pub enum ItemEdit {
         /// 模板物品序号。
         template: usize,
     },
+    /// 从零创建一件物品并追加到列表末尾（装备库导入用）。
+    ///
+    /// 与 [`Self::CloneItem`] 的区别：克隆要求存档里**已经有**同基型的物品
+    /// 当模板，而装备库要能导入存档里没有的物品，所以必须能从基型代码直接构造。
+    CreateItem {
+        /// 基型代码（如 `uap`、`rin`）。
+        code: String,
+        /// 品质：`暗金` / `套装` / `普通`。
+        quality: String,
+        /// 表行索引（暗金/套装的 `*ID`），普通物品给 `None`。
+        #[serde(default)]
+        file_index: Option<u16>,
+        /// 属性：(属性 ID, 数值, 层)。会**整体替换**新物品的属性。
+        #[serde(default)]
+        stats: Vec<(u16, i64, i32)>,
+        /// 目标存储页名（`Inventory`/`Stash`/`Cube`/`Belt`）。
+        #[serde(default = "default_store_page")]
+        store_page: String,
+        /// 目标列。
+        #[serde(default)]
+        col: u8,
+        /// 目标行。
+        #[serde(default)]
+        row: u8,
+        /// 物品等级（影响部分公式）。
+        #[serde(default = "default_item_level")]
+        level: u8,
+    },
     /// 整体替换物品的属性列表（物品导入用）。
     ReplaceStats {
         /// 物品序号。
@@ -722,6 +750,41 @@ impl EditSession {
                     .clone();
                 self.file.save.items.push(src);
             }
+            ItemEdit::CreateItem {
+                code,
+                quality,
+                file_index,
+                stats,
+                store_page,
+                col,
+                row,
+                level,
+            } => {
+                let raw_page = crate::blueprint::store_page_raw(store_page)
+                    .ok_or_else(|| EditError::Invalid(format!("未知的存储页：{store_page}")))?;
+                // 物品的 `version` 必须与存档版本对齐：写盘时是按**物品自身的
+                // version** 决定位宽编码的，留成默认的 0 会写出别的格式，
+                // 读回来直接报错（不是"能打开但显示异常"，是打不开）。
+                let version = self.file.header.version as u16;
+                let mut item = build_item(code, quality, *file_index, *level, version)?;
+                item.position.store_page = d2s::StorePage::from_raw(raw_page);
+                item.position.inv_x = *col;
+                item.position.inv_y = *row;
+                item.position.mode = match crate::blueprint::store_page_name(raw_page).as_str() {
+                    "Belt" => ItemMode::InBelt,
+                    "Equip" => ItemMode::Equipped,
+                    _ => ItemMode::Stored,
+                };
+                item.stats = stats
+                    .iter()
+                    .map(|(id, value, layer)| Stat {
+                        id: StatId(*id),
+                        value: *value,
+                        layer: *layer,
+                    })
+                    .collect();
+                self.file.save.items.push(item);
+            }
             ItemEdit::ReplaceStats { index, stats } => {
                 let list: Vec<Stat> = stats
                     .iter()
@@ -867,6 +930,66 @@ pub fn body_location_from_name(name: &str) -> Option<d2s::BodyLocation> {
         }
     }
     None
+}
+
+/// 从基型代码构造一件物品（装备库导入用）。
+///
+/// 与 [`ItemEdit::CloneItem`] 的区别：克隆要求存档里已经有同基型的物品当模板，
+/// 而装备库要导入存档里**没有**的物品，所以必须能从代码直接构造。
+///
+/// `version` 必须传存档版本：写盘时按物品自身的 version 决定位宽编码，
+/// 用默认值会写出别的格式，读回来直接报错。
+/// 新建物品的默认存储页。
+fn default_store_page() -> String {
+    "Inventory".to_string()
+}
+
+/// 新建物品的默认等级（1 级总比 0 级安全：0 级会让部分按等级公式算出 0）。
+fn default_item_level() -> u8 {
+    1
+}
+
+fn build_item(
+    code: &str,
+    quality: &str,
+    file_index: Option<u16>,
+    level: u8,
+    version: u16,
+) -> Result<d2s::Item, EditError> {
+    let code = code.trim();
+    if code.is_empty() {
+        return Err(EditError::Invalid("物品代码不能为空".into()));
+    }
+    let mut item = d2s::Item::new(code);
+    item.version = version;
+    item.level = level;
+    // 品质：暗金/套装靠 `quality_data` 里的表行号区分，普通物品不需要额外数据。
+    // 这里只构造"能装进存档"的最小结构，属性由调用方整体写入。
+    match quality {
+        "暗金" | "Unique" => {
+            item.quality = d2s::ItemQuality::Unique;
+            // `file_index` 是表里的 `*ID`：指错就会变成别的暗金（或读出越界）。
+            item.quality_data = Some(d2s::QualityData::SetUnique {
+                file_index: file_index
+                    .ok_or_else(|| EditError::Invalid("暗金物品必须指定表行索引".to_string()))?,
+            });
+        }
+        "套装" | "Set" => {
+            item.quality = d2s::ItemQuality::Set;
+            item.quality_data = Some(d2s::QualityData::SetUnique {
+                file_index: file_index
+                    .ok_or_else(|| EditError::Invalid("套装物品必须指定表行索引".to_string()))?,
+            });
+        }
+        "普通" | "Normal" | "" => {
+            item.quality = d2s::ItemQuality::Normal;
+            item.quality_data = None;
+        }
+        other => {
+            return Err(EditError::Invalid(format!("不支持的品质：{other}")));
+        }
+    }
+    Ok(item)
 }
 
 /// 在属性列表上设置一条属性（**按 `id + layer` 精确定位**）。
