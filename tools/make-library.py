@@ -192,6 +192,16 @@ def main() -> int:
         print("缺少 itemstatcost.txt，无法换算属性 ID", file=sys.stderr)
         return 1
     stat_id = {r["Stat"]: r["*ID"] for r in item_stat_cost if r.get("Stat")}
+    # 按等级属性的"每级多少"要用 op param 换算（值 ÷ 2^op_param），
+    # 与属性面板显示同一口径。
+    op_param = {
+        r["Stat"]: as_int(r.get("op param", "")) for r in item_stat_cost if r.get("Stat")
+    }
+    # 带 ValShift 的属性（如 item_hp_perlevel 的 8）在存档里按 2^ValShift 对齐，
+    # 每级量要再乘回去，否则写进去的值会被当成 0 丢弃（右移后为 0）。
+    val_shift = {
+        r["Stat"]: as_int(r.get("ValShift", "")) for r in item_stat_cost if r.get("Stat")
+    }
 
     # properties.txt：属性代码 → [(func, stat, param)]
     rules: dict[str, list[tuple[str, str, str]]] = {}
@@ -221,11 +231,33 @@ def main() -> int:
                 as_int(row.get("invheight", "")) or 1,
             )
 
-    def translate(prop: str, value: int) -> list[tuple[int, int, int]] | None:
-        """属性代码 → [(属性ID, 值, 层)]；无法翻译返回 None。"""
+    def translate(
+        prop: str, value: int, par: int = 0
+    ) -> list[tuple[int, int, int]] | None:
+        """属性代码 → [(属性ID, 值, 层)]；无法翻译返回 None。
+
+        `value` 是取满后的固定值；`par` 是"按等级"属性的每级量
+        （表里 `hp/lvl` 这类 `min/max` 为空、`par` 有值）。
+        按等级的属性把 `par` 换成存档里的**每级系数**，不去算总值。
+        """
         rule = rules.get(prop)
         if not rule:
             return None
+        # 按等级：物品只记录"每级加多少"，总量由游戏按角色等级算。
+        #
+        # 存档里这一项是 **6 位整数系数 + ValShift=8 的存储精度**：
+        # 字段只能放 0–63 的整数，写盘时再左移 8 位（× 256）。
+        # 所以每级量只能是整数（游戏里 1.5 这类值由 `par ÷ 8` 得出，
+        # 在存档里无法精确表达，这里按该属性的步长取整）。
+        #
+        # 换算：每级量 = par / 2^op_param → 系数 = round(每级量)
+        #      存档值   = 系数 × 2^ValShift
+        if value == 0 and par != 0:
+            per_level = rule[0][1]
+            divisor = 1 << op_param.get(per_level, 0)
+            shift = 1 << val_shift.get(per_level, 0)
+            coefficient = max(round(par / divisor), 1)
+            value = coefficient * shift
         out: list[tuple[int, int, int]] = []
         inherited = ""
         for func, stat_name, param in rule:
@@ -290,10 +322,12 @@ def main() -> int:
                 # 表里 min/max 为空表示"按等级/按公式计算"，没有固定值可取；
                 # 这类属性**跳过**，否则会写进 0，而 0 在部分属性上
                 # （带 ValShift 的，如每级生命）会让 `d2s` 直接丢弃这条属性。
-                if value == 0:
+                par = as_int(row.get(f"par{k}", ""))
+                # 固定值与每级量都没有 → 没法复现（随机/特殊公式），跳过
+                if value == 0 and par == 0:
                     skipped[prop] = skipped.get(prop, 0) + 1
                     continue
-                got = translate(prop, value)
+                got = translate(prop, value, par)
                 if got:
                     stats.extend(got)
                     stat_ok += 1
