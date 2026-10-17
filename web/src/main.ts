@@ -207,7 +207,7 @@ function skillCell(s: SkillDto): string {
   const icon = skillIcons[iconCodeOf(s)] ?? "";
   const art = icon
     ? `<img src="${icon}" alt="" />`
-    : `<span class="skill-fallback">${escapeHtml((s.name ?? "?").slice(0, 3))}</span>`;
+    : `<span class="skill-fallback">${s.name ? "" : "?"}</span>`;
   const zeroCls = s.level > 0 ? "" : " zero";
   const title = `槽位 ${s.index}｜技能ID ${s.skillId ?? "?"}｜${s.name ?? "（未解析）"}`;
   return `<div class="skill-cell${zeroCls}" title="${escapeAttr(title)}">
