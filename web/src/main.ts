@@ -89,12 +89,15 @@ async function loadBundleInfo(): Promise<BundleInfo | null> {
  * 追加会让这一行越贴越长。
  */
 async function refreshDataset() {
+  // 用户要求首页**不展示**数据来源那行（表数/字符串数/图标数/数据包路径）。
+  // 仍保留 `dataset_info` 调用：它顺带完成一次数据可用性探测，
+  // 也能让后端在缺数据时给出提示；只是不再把细节渲染到界面。
   const info = await call<DatasetInfo>("dataset_info");
-  // 数据来源那段由后端的 data_source 提供（含内置数据包的张数/字符串数/图标数/体积）。
-  // 前端不要再拼一遍"内置数据包 xx MB"——那样这行会出现两遍同名信息。
-  const extra = bundleInfo?.available ? `｜图标 ${bundleInfo.icons} 张` : "";
-  $("#dataset").textContent =
-    `数据集：${info.tables} 张表｜字符串表 ${info.strings} 条（${info.languages.length} 种语言）${extra}｜${info.root}`;
+  const el = $("#dataset");
+  el.textContent = "";
+  el.classList.add("hidden");
+  void info;
+  void bundleInfo;
 }
 
 function setDirty(dirty: boolean) {

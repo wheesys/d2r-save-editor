@@ -692,6 +692,13 @@ body.modal-open { overflow: hidden; }
   min-width: 0;
 }
 
-/* 右上角版本号 */
-.version-tag { margin-left: auto; font-size: 12px; opacity: 0.75; }
+/* 右上角版本号：绝对定位到 header 内，与标题同一行水平对齐。
+ * header 是 sticky（已建立定位上下文），所以绝对定位能贴住它。 */
+.version-tag {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  font-size: 12px;
+  opacity: 0.75;
+}
 

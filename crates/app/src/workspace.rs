@@ -520,12 +520,29 @@ impl Workspace {
         let Some(table) = self.tables.get("PlayerClass") else {
             return HashMap::new();
         };
-        (0..table.len())
-            .filter_map(|row| {
-                let english = table.cell_nonempty(row, "Player Class")?;
-                Some((row as u16, class_name_zh(english).to_string()))
-            })
-            .collect()
+        // 层 = **职业序号**，不是表行号。
+        //
+        // `PlayerClass.txt` 第 5 行是 `Expansion` 占位行（`Code` 为空），
+        // 游戏里 `item_addclassskills` 的层会跳过它：
+        // 0=亚马逊 … 5=德鲁伊、6=刺客。早先直接拿表行号当层，从德鲁伊开始
+        // 就整体错一位（用户实测：界面显示德鲁伊、游戏里是刺客）。
+        let mut out = HashMap::new();
+        let mut index: u16 = 0;
+        for row in 0..table.len() {
+            let has_code = table
+                .cell_nonempty(row, "Code")
+                .map(|c| !c.is_empty())
+                .unwrap_or(false);
+            if !has_code {
+                continue;
+            }
+            let Some(english) = table.cell_nonempty(row, "Player Class") else {
+                continue;
+            };
+            out.insert(index, class_name_zh(english).to_string());
+            index += 1;
+        }
+        out
     }
 
     /// 某个属性的**层（参数）可选值**，供界面做下拉框。
@@ -547,28 +564,11 @@ impl Workspace {
             return Vec::new();
         }
         match id {
-            // item_addclassskills：层 = 职业行号
+            // item_addclassskills：层 = 职业序号（见 `class_local_names` 的说明）
             83 => {
-                // 只保留真正的职业：表里还有 `Expansion` 这种占位行
-                // （`Code` 列为空），它不是一个可选职业，列出来只会让用户困惑
-                // （用户实际反馈"多了个 expansion"）。
-                let real: Vec<u16> = {
-                    let Some(table) = self.tables.get("PlayerClass") else {
-                        return Vec::new();
-                    };
-                    (0..table.len())
-                        .filter(|row| {
-                            table
-                                .cell_nonempty(*row, "Code")
-                                .map(|c| !c.is_empty())
-                                .unwrap_or(false)
-                        })
-                        .map(|row| row as u16)
-                        .collect()
-                };
-                let mut rows: Vec<(u16, String)> = real
-                    .into_iter()
-                    .filter_map(|row| classes.get(&row).map(|name| (row, name.clone())))
+                let mut rows: Vec<(u16, String)> = classes
+                    .iter()
+                    .map(|(index, name)| (*index, name.clone()))
                     .collect();
                 rows.sort_by_key(|(k, _)| *k);
                 rows.into_iter()

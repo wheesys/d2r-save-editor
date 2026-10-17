@@ -23,7 +23,7 @@
         <!-- 版本号：右上角常显，便于确认自己跑的是哪一版 -->
         <span id="app-version" class="muted version-tag"></span>
       </div>
-      <div id="dataset" class="muted"></div>
+      <div id="dataset" class="muted hidden"></div>
 
       <!-- 页签只放"跟当前存档有关"的内容；设置已移到上面的按钮 -->
       <nav id="tabs" class="tabs hidden">
@@ -162,10 +162,10 @@
           <button id="btn-close-settings" class="mini" data-close-settings>关闭 ✕</button>
         </div>
         <p class="muted">
-          背包/箱子大小与「佣兵全装备」是 mod 改动，<strong>存档里读不出来</strong>。
           这些设置与存档无关，改一次会记住（下次启动自动带上）。
         </p>
-        <div id="layout-questions" class="questions"></div>
+        <!-- 推断/需确认的提示不再展示：用户明确要求去掉，保留容器避免脚本报错 -->
+        <div id="layout-questions" class="questions hidden"></div>
         <!-- 设置文件路径 / 上次保存结果：排查"设置没保存"时用 -->
         <div id="settings-path" class="muted"></div>
         <div class="grid">
@@ -215,10 +215,6 @@
         </div>
 
         <h3>属性（<span id="stat-count">0</span> 条）</h3>
-        <p class="muted">
-          值必须落在游戏能精确存储的范围内：<strong>步长 &gt; 1 的属性，值要是步长的倍数</strong>，
-          否则写盘会被截断，程序会直接拒绝。
-        </p>
         <div class="table-wrap"><table id="item-stats"></table></div>
 
         <!-- 新增属性单独一行并带标签：之前和按钮挤在同一行且没有标签，
