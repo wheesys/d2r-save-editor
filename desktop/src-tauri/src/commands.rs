@@ -52,6 +52,12 @@ pub fn skills_view(state: State<'_, AppState>) -> R<SkillsViewDto> {
     state.0.lock().unwrap().skills_view()
 }
 
+/// 单个技能的图标（PNG data URL）；没有图标数据时返回 `null`。
+#[tauri::command]
+pub fn skill_icon(state: State<'_, AppState>, skill_id: u16) -> Option<String> {
+    state.0.lock().unwrap().skill_icon(skill_id)
+}
+
 /// 传送点状态。
 #[tauri::command]
 pub fn waypoints(state: State<'_, AppState>) -> R<Vec<WaypointsDto>> {

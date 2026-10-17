@@ -49,8 +49,10 @@ let skills: SkillDto[] = [];
 let items: ItemDto[] = [];
 /** 技能页视图（按游戏三系技能树分组）。后端不支持时为 null，界面退回平铺。 */
 let skillsView: SkillsViewDto | null = null;
-/** 技能图标缓存（按英文技能名取，与物品图标分开）。 */
-let skillIcons: Record<string, string> = {};
+/** 技能图标缓存（技能 ID → data URL，与物品图标分开）。 */
+let skillIcons: Record<number, string> = {};
+/** 已加载图标的职业代码：同一职业不重复请求 30 次。 */
+let skillIconsClass = "";
 
 function toast(message: string, kind: "ok" | "error" = "ok", ms = 4000) {
   const el = $("#toast");
@@ -136,6 +138,8 @@ function fillCharacter(c: CharacterDto) {
   ($("#f-skill-points") as HTMLInputElement).value = String(c.skillPoints);
   ($("#f-gold") as HTMLInputElement).value = String(c.gold);
   ($("#f-stash-gold") as HTMLInputElement).value = String(c.stashGold);
+  // 经验随等级自动计算，只读显示（改等级时后端会一起写对）
+  ($("#f-experience") as HTMLInputElement).value = String(c.experience);
   $("#char-readonly").textContent =
     `${c.name}｜${c.class}｜生命 ${c.life}/${c.maxLife}｜法力 ${c.mana}/${c.maxMana}｜体力 ${c.stamina}｜经验 ${c.experience}`;
   $("#char-section").classList.remove("hidden");
@@ -154,9 +158,9 @@ function fillCharacter(c: CharacterDto) {
 function renderSkills() {
   // 顶部：职业 + 剩余技能点（游戏里也是这个位置）
   const head = $("#skills-head");
-  if (skillsView && skillsView.classCode) {
+  if (skillsView && skillsView.className) {
     head.innerHTML =
-      `<span class="badge">职业 ${escapeHtml(skillsView.classCode)}</span>` +
+      `<span class="badge">职业 ${escapeHtml(skillsView.className)}</span>` +
       `<span class="muted">剩余技能点 <b>${skillsView.skillPoints}</b></span>`;
   } else {
     head.innerHTML = "";
@@ -171,7 +175,23 @@ function renderSkills() {
       <div class="skill-tree">
         <div class="skill-tree-head">${escapeHtml(tree.name)}</div>
         <div class="skill-grid">
-          ${tree.skills.map((s) => skillCell(s)).join("")}
+          ${[0, 1, 2, 3, 4, 5]
+            .map((row) => {
+              const start = row * 3;
+              const cells = tree.skills.slice(start, start + 3);
+              const levels = (tree.levels ?? []).slice(start, start + 3);
+              // 同一排的技能等级门槛相同（游戏里就是这样排的），取第一个非零值
+              const level = levels.find((v) => v > 0) ?? 0;
+              const rowNames = cells
+                .filter((s) => s.skillId !== null)
+                .map((s) => s.name ?? "")
+                .join(" · ");
+              return (
+                `<div class="skill-level" title="${escapeAttr(rowNames)}">Lv${level}</div>` +
+                cells.map((s) => skillCell(s)).join("")
+              );
+            })
+            .join("")}
         </div>
       </div>`,
       )
@@ -204,7 +224,7 @@ function skillCell(s: SkillDto): string {
   if (s.skillId === null && s.name === null) {
     return `<div class="skill-empty"></div>`;
   }
-  const icon = skillIcons[iconCodeOf(s)] ?? "";
+  const icon = s.skillId === null ? "" : (skillIcons[s.skillId] ?? "");
   const art = icon
     ? `<img src="${icon}" alt="" />`
     // 没有技能图标数据源时，用技能名前两字占位（空白格子看不出是什么）
@@ -229,13 +249,39 @@ function skillRow(s: SkillDto): string {
 }
 
 /**
- * 技能图标按**技能代码名**查（图标文件名就是 skills.txt 的 skill 列改成小写下划线）。
+ * 预取当前角色全部技能的图标（按技能 ID 缓存）。
  *
- * 名字是本地化的，所以先用技能树名单里的英文名反查；拿不到就退化成文字。
+ * 只取当前职业的 30 个技能，逐个 `skill_icon` 并发请求；失败时静默跳过，
+ * 界面会退化用技能名前两字占位。
  */
-function iconCodeOf(s: SkillDto): string {
-  const english = skillsView?.englishNames?.[String(s.skillId ?? "")];
-  return english ? english.toLowerCase().replace(/[^a-z0-9]+/g, "") : "";
+async function loadSkillIcons() {
+  if (!skillsView) return;
+  if (skillsView.classCode === skillIconsClass && Object.keys(skillIcons).length > 0) return;
+  const ids = new Set<number>();
+  for (const tree of skillsView.trees) {
+    for (const skill of tree.skills) {
+      if (skill.skillId !== null) ids.add(skill.skillId);
+    }
+  }
+  for (const skill of skillsView.unclassified) {
+    if (skill.skillId !== null) ids.add(skill.skillId);
+  }
+  try {
+    const entries = await Promise.all(
+      [...ids].map(async (id) => {
+        const url = await call<string | null>("skill_icon", { skillId: id });
+        return [id, url] as const;
+      }),
+    );
+    const next: Record<number, string> = {};
+    for (const [id, url] of entries) {
+      if (url) next[id] = url;
+    }
+    skillIcons = next;
+    if (Object.keys(next).length > 0) skillIconsClass = skillsView.classCode;
+  } catch {
+    /* 老后端没有这个命令：保留文字占位 */
+  }
 }
 
 /**
@@ -409,29 +455,6 @@ function shortSlot(slot: string): string {
 }
 
 /** 收集物品表里的改动（耐久/数量/孔数） */
-function collectItemEdits(): ItemEdit[] {
-  const edits: ItemEdit[] = [];
-  document.querySelectorAll<HTMLInputElement>("input[data-dur-index]").forEach((el) => {
-    const index = Number(el.dataset.durIndex);
-    const value = Number(el.value);
-    const old = items.find((i) => i.index === index)?.durability ?? 0;
-    if (value !== old) edits.push({ kind: "setDurability", index, value });
-  });
-  document.querySelectorAll<HTMLInputElement>("input[data-qty-index]").forEach((el) => {
-    const index = Number(el.dataset.qtyIndex);
-    const value = Number(el.value);
-    const old = items.find((i) => i.index === index)?.quantity ?? 0;
-    if (value !== old) edits.push({ kind: "setQuantity", index, value });
-  });
-  document.querySelectorAll<HTMLInputElement>("input[data-sock-index]").forEach((el) => {
-    const index = Number(el.dataset.sockIndex);
-    const count = Number(el.value);
-    const old = items.find((i) => i.index === index)?.socketCount ?? 0;
-    if (count !== old) edits.push({ kind: "setSockets", index, count });
-  });
-  return edits;
-}
-
 /**
  * 选中一件物品：打开**属性弹窗**。
  *
@@ -610,11 +633,8 @@ function showAddStatHint() {
   const entry = statCatalog.find((s) => s.id === id);
   if (!entry) {
     hint.textContent = "";
-    $("#add-stat-value2-slot").innerHTML = "";
     return;
   }
-  // 不同属性的"值2"形态不同（下拉框或数字框），选中就重建
-  renderAddStatValue2(id);
 
   const parts: string[] = [];
   if (entry.minValue !== null && entry.maxValue !== null) {
@@ -630,9 +650,30 @@ function showAddStatHint() {
   input.dataset.min = entry.minValue === null ? "" : String(entry.minValue);
   input.dataset.max = entry.maxValue === null ? "" : String(entry.maxValue);
   input.dataset.step = String(entry.displayStep);
-  // 默认值取范围内的值，免得一打开就是非法的
-  if (entry.minValue !== null && Number(input.value) < entry.minValue) {
+}
+
+/**
+ * 选中属性时：重建「值2」控件，并把「值1」默认填成该属性的最大值。
+ *
+ * **只在属性选择变化时调用**。值1 的 input 事件不能走这里——之前每敲一个
+ * 字符都会重建值2 的下拉，导致刚选好的职业/技能被重置（用户看到"三个框联动"）。
+ */
+function onAddStatSelected() {
+  const sel = $("#add-stat-select") as HTMLSelectElement;
+  const input = $("#add-stat-value") as HTMLInputElement;
+  const id = Number(sel.value);
+  const entry = statCatalog.find((s) => s.id === id);
+
+  renderAddStatValue2(id);
+  showAddStatHint();
+
+  if (!entry) return;
+  if (entry.maxValue !== null) {
+    input.value = String(entry.maxValue);
+  } else if (entry.minValue !== null) {
     input.value = String(entry.minValue);
+  } else {
+    input.value = "";
   }
 }
 
@@ -706,7 +747,12 @@ function fillAddStatOptions() {
     )
     .join("");
   if (matched.some((s) => String(s.id) === previous)) sel.value = previous;
-  showAddStatHint();
+  // 选择变了才重建值2 / 重置值1；只是搜索词变化时不要动用户的输入
+  if (sel.value !== previous) {
+    onAddStatSelected();
+  } else {
+    showAddStatHint();
+  }
 }
 
 /** 重新读当前物品的明细并刷新弹窗（添加属性后立刻反映到列表里）。 */
@@ -937,6 +983,7 @@ async function loadAll() {
   } catch {
     skillsView = null;
   }
+  await loadSkillIcons();
   renderSkills();
   // 小站名要在渲染传送点之前拿到，否则只能显示编号
   if (waypointNames.length === 0) {
@@ -1088,17 +1135,31 @@ function renderMerc() {
 
 
 
-async function applyEdits(edits: Edit[], label: string) {
+async function applyEdits(edits: Edit[], label: string): Promise<boolean> {
   if (edits.length === 0) {
     toast("没有需要应用的修改", "error");
-    return;
+    return false;
   }
   try {
     const n = await call<number>("apply_edits", { edits });
     toast(`已应用 ${n} 条修改（${label}）。点「保存」才会写入文件。`);
     await loadAll();
+    return true;
   } catch (e) {
     showError(e, "修改被拒绝");
+    return false;
+  }
+}
+
+/** 物品表里的单行修改（耐久/数量/孔数）改完立即提交。 */
+async function applyItemEditNow(edit: ItemEdit) {
+  try {
+    await call<number>("apply_item_edits", { edits: [edit], target: "inventory" });
+    toast("已修改物品。点「保存」才会写入文件。");
+    await loadAll();
+  } catch (e) {
+    showError(e, "物品修改被拒绝");
+    await loadAll();
   }
 }
 
@@ -1329,19 +1390,29 @@ function clearEmptyState() {
 }
 
 
+/** 角色页输入框 → 存档属性 ID 与当前值读取方式（改哪个就提交哪个）。 */
+const CHAR_STAT_FIELDS: Record<string, { stat: number; read: (c: CharacterDto) => number }> = {
+  "f-strength": { stat: STAT.STRENGTH, read: (c) => c.strength },
+  "f-dexterity": { stat: STAT.DEXTERITY, read: (c) => c.dexterity },
+  "f-vitality": { stat: STAT.VITALITY, read: (c) => c.vitality },
+  "f-energy": { stat: STAT.ENERGY, read: (c) => c.energy },
+  "f-stat-points": { stat: STAT.STAT_POINTS, read: (c) => c.statPoints },
+  "f-skill-points": { stat: STAT.SKILL_POINTS, read: (c) => c.skillPoints },
+  "f-gold": { stat: STAT.GOLD, read: (c) => c.gold },
+  "f-stash-gold": { stat: STAT.STASH_GOLD, read: (c) => c.stashGold },
+};
+
 function bind() {
   // 明细面板：应用该物品的修改 / 添加属性
   $("#btn-add-stat").addEventListener("click", addStatNow);
 
   // 选中的属性要在**添加之前**就告诉他最大/最小值（否则填了才知道超范围）
-  $("#add-stat-select").addEventListener("change", showAddStatHint);
+  $("#add-stat-select").addEventListener("change", onAddStatSelected);
   // 属性有 300 多条：搜索框实时筛选下拉列表（匹配中文名与内部名）
   $("#add-stat-search").addEventListener("input", fillAddStatOptions);
+  // 值1 只更新范围提示；**不要**在这里重建值2，否则每敲一个字符都会把
+  // 已选好的职业/技能重置（用户遇到的"三个框联动"）。
   $("#add-stat-value").addEventListener("input", showAddStatHint);
-  // 属性目录是异步载入的，拿到后补一次提示
-  window.setTimeout(() => {
-    if (statCatalog.length > 0) showAddStatHint();
-  }, 800);
 
   // 导入/导出物品
   $("#btn-export-item").addEventListener("click", async () => {
@@ -1524,54 +1595,62 @@ function bind() {
   });
 
 
-  $("#btn-apply-items").addEventListener("click", async () => {
-    const edits = collectItemEdits();
-    if (edits.length === 0) {
-      toast("物品表里没有改动（改完耐久/数量再点这里）", "error");
-      return;
+  // 物品表里的耐久/数量/孔数：改完直接提交，不再需要「应用物品修改」按钮
+  $("#items").addEventListener("change", async (ev) => {
+    const el = ev.target as HTMLInputElement;
+    let edit: ItemEdit | null = null;
+    if (el.dataset.durIndex) {
+      edit = { kind: "setDurability", index: Number(el.dataset.durIndex), value: Number(el.value) };
+    } else if (el.dataset.qtyIndex) {
+      edit = { kind: "setQuantity", index: Number(el.dataset.qtyIndex), value: Number(el.value) };
+    } else if (el.dataset.sockIndex) {
+      edit = { kind: "setSockets", index: Number(el.dataset.sockIndex), count: Number(el.value) };
     }
-    try {
-      const n = await call<number>("apply_item_edits", { edits, target: selectedTarget });
-      toast(`已应用 ${n} 条物品修改。点「保存」才会写入文件。`);
-      await loadAll();
-    } catch (e) {
-      showError(e, "物品修改被拒绝");
-    }
+    if (edit) await applyItemEditNow(edit);
   });
 
   $("#btn-apply-layout").addEventListener("click", applyLayout);
   $("#btn-check-bounds").addEventListener("click", checkBounds);
 
-  $("#btn-apply-char").addEventListener("click", async () => {
-    const num = (sel: string) => Number(($(sel) as HTMLInputElement).value);
+  // 角色页：改哪个字段就提交哪个，不再需要「应用角色修改」。
+  // 等级单独处理：后端要按职业经验表同步总经验，只改等级会让游戏重新判定。
+  $("#char-section").addEventListener("change", async (ev) => {
+    const input = ev.target as HTMLInputElement;
+    if (!input.id.startsWith("f-")) return;
     const char = await call<CharacterDto>("character");
-    const edits: Edit[] = [];
-    const want = {
-      level: num("#f-level"),
-      strength: num("#f-strength"),
-      dexterity: num("#f-dexterity"),
-      vitality: num("#f-vitality"),
-      energy: num("#f-energy"),
-      statPoints: num("#f-stat-points"),
-      skillPoints: num("#f-skill-points"),
-      gold: num("#f-gold"),
-      stashGold: num("#f-stash-gold"),
-    };
-    if (want.level !== char.level) edits.push({ kind: "setLevel", level: want.level });
-    const statPairs: [number, number, number][] = [
-      [STAT.STRENGTH, want.strength, char.strength],
-      [STAT.DEXTERITY, want.dexterity, char.dexterity],
-      [STAT.VITALITY, want.vitality, char.vitality],
-      [STAT.ENERGY, want.energy, char.energy],
-      [STAT.STAT_POINTS, want.statPoints, char.statPoints],
-      [STAT.SKILL_POINTS, want.skillPoints, char.skillPoints],
-      [STAT.GOLD, want.gold, char.gold],
-      [STAT.STASH_GOLD, want.stashGold, char.stashGold],
-    ];
-    for (const [stat, value, old] of statPairs) {
-      if (value !== old) edits.push({ kind: "setStat", stat, value });
+
+    if (input.id === "f-level") {
+      const level = Number(input.value);
+      if (!Number.isInteger(level) || level < 1 || level > 99) {
+        toast("等级必须是 1–99 的整数", "error");
+        input.value = String(char.level);
+        return;
+      }
+      if (level === char.level) return;
+      await applyEdits([{ kind: "setLevel", level }], "等级");
+      return;
     }
-    await applyEdits(edits, "角色");
+
+    const field = CHAR_STAT_FIELDS[input.id];
+    if (!field) return;
+    const value = Number(input.value);
+    const old = field.read(char);
+    if (!Number.isInteger(value) || value < 0) {
+      toast("属性值必须是非负整数", "error");
+      input.value = String(old);
+      return;
+    }
+    // 输入框的 max 来自存档位宽（技能点 8 位 = 255），先给出比后端 ID 更直白的提示
+    const max = Number(input.max);
+    if (input.max && value > max) {
+      toast(`「${input.parentElement?.textContent?.trim() ?? "该属性"}」最大只能到 ${max}`, "error");
+      input.value = String(old);
+      return;
+    }
+    if (value === old) return;
+    const ok = await applyEdits([{ kind: "setStat", stat: field.stat, value }], "角色");
+    // 被位宽拒绝时（例如技能点最多 255），把输入框恢复成存档里的真实值
+    if (!ok) fillCharacter(await call<CharacterDto>("character"));
   });
 
   $("#btn-waypoints-all").addEventListener("click", async () => {
@@ -1581,16 +1660,20 @@ function bind() {
     );
   });
 
-  $("#btn-apply-skills").addEventListener("click", async () => {
-    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>("input[data-skill-index]"));
-    const edits: Edit[] = [];
-    for (const input of inputs) {
-      const index = Number(input.dataset.skillIndex);
-      const level = Number(input.value);
-      const old = skills.find((s) => s.index === index)?.level ?? 0;
-      if (level !== old) edits.push({ kind: "setSkill", index, level });
+  // 技能：改数字即时生效，不再需要「应用技能修改」按钮
+  $("#skills").addEventListener("change", async (ev) => {
+    const input = ev.target as HTMLInputElement;
+    if (!input.dataset.skillIndex) return;
+    const index = Number(input.dataset.skillIndex);
+    const level = Number(input.value);
+    const old = skills.find((s) => s.index === index)?.level ?? 0;
+    if (level === old) return;
+    if (!Number.isInteger(level) || level < 0 || level > 99) {
+      toast("技能等级必须是 0–99 的整数", "error");
+      input.value = String(old);
+      return;
     }
-    await applyEdits(edits, "技能");
+    await applyEdits([{ kind: "setSkill", index, level }], "技能");
   });
 
   document.addEventListener("change", async (ev) => {

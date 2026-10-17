@@ -72,9 +72,15 @@ pub struct SkillView {
 )]
 pub enum Edit {
     /// 设置等级。
+    ///
+    /// `experience` 是**该等级对应的总经验值**：界面按职业查经验表算好后一起传进来，
+    /// 核心层不内置经验表（表是数据，不是常量）。为兼容旧调用方，缺省只改等级。
     SetLevel {
         /// 新等级（1–99）。
         level: u8,
+        /// 同步写入的总经验值；`None` 表示不改经验（不推荐）。
+        #[serde(default)]
+        experience: Option<i64>,
     },
     /// 设置属性。
     SetStat {
@@ -125,7 +131,7 @@ pub enum Edit {
         /// 槽下标（0–15）。
         slot: usize,
     },
-    /// 把某难度的全部任务标为已完成（不含 Act V 的未使用槽）。
+    /// 把某难度的全部任务标为已完成（不含 Act V 的事件/闲聊/洗点槽）。
     CompleteAllQuests {
         /// 难度。
         difficulty: u8,
@@ -157,23 +163,33 @@ pub mod quest_bits {
 /// 避免把"这任务做过什么"的记录抹掉。
 pub const QUEST_COMPLETE_MASK: u16 = quest_bits::QUEST_LOG | quest_bits::REWARD_GRANTED;
 
-/// 单幕的真任务槽数量（槽 1..=6）。
+/// 单幕最多有几个任务（各幕实际范围见 [`quest_slot_range_of_act`]）。
 ///
 /// 这是**存档布局**（不是可配置数据），所以放在核心层；
 /// 各幕实际有几个任务由数据层的名字表决定（Act IV 只有 3 个）。
 pub const MAX_QUESTS_PER_ACT: usize = 6;
 
-/// 某幕实际有几个任务。
+/// 某幕真任务在 16 槽位段里的**起始槽与数量**。
 ///
-/// **Act IV 是例外：只有 3 个任务**（堕落天使、恐惧的终结、地狱熔炉），
-/// 它的槽 4..=7 装的是别幕 NPC 的对话状态（例如 Act I Flavie 的闲聊）。
-/// 批量操作必须按这个数量来，否则会把那些对话状态一起改掉。
-pub const fn quest_count_of_act(act: usize) -> usize {
-    if act == 3 {
-        3
-    } else {
-        MAX_QUESTS_PER_ACT
+/// 这是存档布局（不是可配置数据），所以放在核心层：
+///
+/// - Act I–III：槽 1..=6 是六个任务；
+/// - Act IV：只有 3 个任务（槽 1..=3），槽 4..=7 是 NPC 对话状态；
+/// - Act V：槽 0 = 黑暗 Wanderer、槽 1 = 哈德里尔闲聊、槽 2 = 未使用，
+///   六个任务从**槽 3** 开始（3..=8），槽 9 = 阿卡拉洗点。
+///
+/// 之前把 Act V 也当成 1..=6，导致"完成所有"漏掉最后的通过仪式与毁灭前夕。
+pub const fn quest_slot_range_of_act(act: usize) -> (usize, usize) {
+    match act {
+        3 => (1, 3),
+        4 => (3, 6),
+        _ => (1, 6),
     }
+}
+
+/// 某幕实际有几个任务。
+pub const fn quest_count_of_act(act: usize) -> usize {
+    quest_slot_range_of_act(act).1
 }
 
 /// 编辑错误。
@@ -317,22 +333,69 @@ impl EditSession {
             .collect()
     }
 
+    /// 校验玩家属性值能否被存档位宽表示。
+    ///
+    /// 玩家属性按 `ItemStatCost.txt` 的 **`CSvBits`** 编码（不是物品的 `Save Bits`）：
+    /// 例如 `newskills` 只有 8 位，写 300 会被 d2s 静默截成 255，保存时的
+    /// "写出前 vs 重新解析后"校验就会失败。这里在 apply 阶段直接拒绝。
+    fn check_player_stat(&self, id: d2s::StatId, value: i64) -> Result<(), EditError> {
+        use d2s::ExternalData;
+
+        let info = d2s::data::default_data()
+            .stat_info(id, self.file.header.version)
+            .map_err(|e| EditError::Invalid(format!("属性 {} 无法校验：{e}", id.0)))?;
+        let bits = info.csv_bits as u32;
+        if bits == 0 || bits >= 63 {
+            return Ok(());
+        }
+        let (min, max) = if info.csv_signed {
+            (-(1i64 << (bits - 1)), (1i64 << (bits - 1)) - 1)
+        } else {
+            (0, (1i64 << bits) - 1)
+        };
+        if !(min..=max).contains(&value) {
+            return Err(EditError::Invalid(format!(
+                "属性 {} 的值 {value} 超出存档位宽（{min}–{max}），写进去会被截断",
+                id.0
+            )));
+        }
+        if info.val_shift > 0 {
+            let step = 1i64 << info.val_shift;
+            if value % step != 0 {
+                return Err(EditError::Invalid(format!(
+                    "属性 {} 的值 {value} 必须是 {step} 的倍数（存档按 {step} 的精度存）",
+                    id.0
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// 应用一条指令（不落盘）。
     pub fn apply(&mut self, edit: Edit) -> Result<(), EditError> {
         use d2s::StatId;
         match &edit {
-            Edit::SetLevel { level } => {
+            Edit::SetLevel { level, experience } => {
                 if !(1..=99).contains(level) {
                     return Err(EditError::Invalid(format!("等级必须在 1–99，收到 {level}")));
                 }
                 self.file.save.character.level = *level;
                 self.file.save.stats.set(StatId::LEVEL, *level as i64);
+                // 等级与经验必须一起改：只改等级会让下一级所需经验错位，
+                // 游戏里可能立刻升级/降级，甚至经验条显示负数。
+                if let Some(xp) = experience {
+                    if *xp < 0 {
+                        return Err(EditError::Invalid(format!("经验值不能为负：{xp}")));
+                    }
+                    self.file.save.stats.set(StatId::EXPERIENCE, *xp);
+                }
             }
             Edit::SetStat { stat, value } => {
                 if *value < 0 {
                     return Err(EditError::Invalid(format!("属性值不能为负：{value}")));
                 }
                 let id = StatId(*stat as u16);
+                self.check_player_stat(id, *value)?;
                 self.file.save.stats.set(id, *value);
             }
             Edit::SetSkill { index, level } => {
@@ -402,8 +465,8 @@ impl EditSession {
                         "难度 {difficulty} 的任务段不存在"
                     )));
                 };
-                // 每幕只处理真任务槽：槽 0 是序章、槽 7 是收尾，
-                // Act IV 的槽 4..7 与 Act V 的槽 8..15 装的是别的东西，不能乱动。
+                // 每幕只处理真任务槽：Act IV 的槽 4..7、Act V 的槽 0..2 与 9..15
+                // 装的不是任务（详见 [`quest_slot_range_of_act`]），不能乱动。
                 let acts: [Vec<&mut d2s::QuestFlags>; 5] = [
                     q.act1.slots_mut(),
                     q.act2.slots_mut(),
@@ -412,8 +475,8 @@ impl EditSession {
                     q.act5.slots_mut(),
                 ];
                 for (act, slots) in acts.into_iter().enumerate() {
-                    let count = quest_count_of_act(act);
-                    for flags in slots.into_iter().skip(1).take(count) {
+                    let (start, count) = quest_slot_range_of_act(act);
+                    for flags in slots.into_iter().skip(start).take(count) {
                         // bitflags 2.x 没有可变的 bits()，只能读出→算→写回
                         *flags =
                             d2s::QuestFlags::from_bits_retain(flags.bits() | QUEST_COMPLETE_MASK);
@@ -666,5 +729,18 @@ mod tests {
         assert!(difficulty_from(0).is_ok());
         assert!(difficulty_from(2).is_ok());
         assert!(matches!(difficulty_from(3), Err(EditError::Invalid(_))));
+    }
+
+    /// 旧前端只传 `level`，`experience` 必须能缺省（随后由应用层补齐）。
+    #[test]
+    fn set_level_without_experience_is_backward_compatible() {
+        let edit: Edit = serde_json::from_str(r#"{"kind":"setLevel","level":5}"#).unwrap();
+        assert!(matches!(
+            edit,
+            Edit::SetLevel {
+                level: 5,
+                experience: None
+            }
+        ));
     }
 }

@@ -59,6 +59,7 @@ pub fn run() {
             commands::character,
             commands::skills,
             commands::skills_view,
+            commands::skill_icon,
             commands::waypoints,
             commands::item_details,
             commands::item_stats,

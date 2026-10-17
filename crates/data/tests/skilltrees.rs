@@ -187,3 +187,50 @@ fn unknown_class_has_no_trees() {
     assert!(trees_for_class(" SOR ").is_some());
     assert!(trees_for_class("Sor").is_some());
 }
+
+/// 图标编号与等级门槛必须和技能名单一一对应，空格用 0 占位。
+#[test]
+fn icons_and_levels_align_with_skills() {
+    let mut problems = Vec::new();
+    for class in CLASS_SKILL_TREES {
+        for tree in class.trees {
+            if tree.icons.len() != tree.skills.len() || tree.levels.len() != tree.skills.len() {
+                problems.push(format!(
+                    "{}/{}: 三个数组长度不一致（skills={}, levels={}, icons={}）",
+                    class.class_code,
+                    tree.name,
+                    tree.skills.len(),
+                    tree.levels.len(),
+                    tree.icons.len()
+                ));
+                continue;
+            }
+            for (i, skill) in tree.skills.iter().enumerate() {
+                let (level, icon) = (tree.levels[i], tree.icons[i]);
+                if skill.is_empty() {
+                    if level != 0 || icon != 0 {
+                        problems.push(format!(
+                            "{}/{} 第 {i} 格是空格，但 levels={level} icons={icon}",
+                            class.class_code, tree.name
+                        ));
+                    }
+                } else if !(1..=30).contains(&icon) {
+                    problems.push(format!(
+                        "{}/{} 第 {i} 格 {skill:?} 的图标编号 {icon} 不在 1..=30",
+                        class.class_code, tree.name
+                    ));
+                } else if level == 0 {
+                    problems.push(format!(
+                        "{}/{} 第 {i} 格 {skill:?} 没有等级门槛",
+                        class.class_code, tree.name
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "技能树数据不一致：\n{}",
+        problems.join("\n")
+    );
+}

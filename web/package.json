@@ -1,7 +1,7 @@
 {
   "name": "d2r-save-editor-web",
   "private": true,
-  "version": "0.0.4",
+  "version": "0.0.5",
   "type": "module",
   "description": "D2R 存档编辑器前端（Vite + TypeScript，无框架）",
   "scripts": {

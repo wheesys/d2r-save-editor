@@ -2,12 +2,12 @@
 //!
 //! 两个容易出错的地方，各有一条测试盯着：
 //! 1. 掩码里的位必须与解析内核 `d2s::QuestFlags` 的定义一致（两边是独立声明的）；
-//! 2. "全解锁"只能动真任务槽（1..=6），不能碰序章、收尾槽、
-//!    Act IV 的 NPC 对话槽、Act V 的未使用槽。
+//! 2. "全解锁"只能动真任务槽（按幕的槽位范围），不能碰序章、收尾槽、
+//!    Act IV 的 NPC 对话槽、Act V 的黑暗 Wanderer / 闲聊 / 洗点槽。
 
 use std::path::{Path, PathBuf};
 
-use d2r_core::{Edit, EditSession, MAX_QUESTS_PER_ACT, QUEST_COMPLETE_MASK};
+use d2r_core::{quest_slot_range_of_act, Edit, EditSession, QUEST_COMPLETE_MASK};
 
 fn sample() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("D2R_SAMPLES_DIR") {
@@ -79,7 +79,10 @@ fn complete_one_quest_sets_bits_and_keeps_others() {
     // 找一个当前**没有**完成任务位的槽，避免"本来就完成"导致断言无意义
     let before = session.quests();
     let (act, slot) = (0..5)
-        .flat_map(|a| (1..=MAX_QUESTS_PER_ACT).map(move |s| (a, s)))
+        .flat_map(|a| {
+            let (start, count) = quest_slot_range_of_act(a);
+            (start..start + count).map(move |s| (a, s))
+        })
         .find(|(a, s)| before[0][*a][*s] & QUEST_COMPLETE_MASK != QUEST_COMPLETE_MASK)
         .expect("应能找到未完成的槽");
 
@@ -151,10 +154,9 @@ fn complete_all_touches_only_real_quest_slots() {
     let after = session.quests()[0].clone();
 
     for (act, (before_act, after_act)) in before.iter().zip(after.iter()).enumerate() {
+        let (start, count) = quest_slot_range_of_act(act);
         for (slot, (b, a)) in before_act.iter().zip(after_act.iter()).enumerate() {
-            let is_real = (1..=MAX_QUESTS_PER_ACT).contains(&slot);
-            // Act IV 只有 3 个真任务，槽 4..=6 虽然落在 1..=6 里但不是任务
-            let is_real = is_real && !(act == 3 && slot > 3);
+            let is_real = (start..start + count).contains(&slot);
             if is_real {
                 assert_eq!(
                     a & QUEST_COMPLETE_MASK,

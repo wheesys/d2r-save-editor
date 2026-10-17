@@ -204,7 +204,9 @@ impl Workspace {
             Some(t) => d2r_data::WaypointNamer::new(t, &strings),
             None => d2r_data::WaypointNamer::default(),
         };
-        let quest_namer = d2r_data::QuestNamer::new(&strings);
+        let quest_layout: Vec<(usize, usize)> =
+            (0..5).map(d2r_core::quest_slot_range_of_act).collect();
+        let quest_namer = d2r_data::QuestNamer::new(&strings, &quest_layout);
 
         // 读取用户设置：布局是 mod 级、整机一份。读出来直接当默认值，
         // 这样"设置过一次"之后每次打开任何角色都不用再填；
@@ -421,6 +423,8 @@ impl Workspace {
             format!("{:?}", session.file.save.character.class)
         };
         let class_code = self.class_code_of(&class_name);
+        let raw_code = class_code.clone().unwrap_or_default();
+        let class_name_zh = class_short_zh(&raw_code);
 
         // 没有对应的树（未知职业）就把全部技能当"未归类"
         let Some(trees) = class_code
@@ -428,10 +432,8 @@ impl Workspace {
             .and_then(d2r_data::skilltree::trees_for_class)
         else {
             return Ok(SkillsViewDto {
-                class_code: class_code
-                    .as_deref()
-                    .map(class_short_zh)
-                    .unwrap_or_default(),
+                class_code: raw_code,
+                class_name: class_name_zh,
                 trees: Vec::new(),
                 unclassified: all,
                 skill_points,
@@ -474,15 +476,13 @@ impl Workspace {
         }
 
         Ok(SkillsViewDto {
-            class_code: class_code
-                .as_deref()
-                .map(class_short_zh)
-                .unwrap_or_default(),
+            class_code: raw_code,
+            class_name: class_name_zh,
             trees: trees
                 .iter()
                 .zip(grouped)
                 .map(|(tree, skills)| SkillTreeDto {
-                    name: tree_name_zh(tree.name).to_string(),
+                    name: tree.name.to_string(),
                     // **空格也要保留**：技能树是 6 行 × 3 列的行优先网格，
                     // 缺格用占位项填上，界面才能还原游戏里的左中右三条线。
                     skills: skills
@@ -496,12 +496,34 @@ impl Workspace {
                             })
                         })
                         .collect(),
+                    levels: tree.levels.to_vec(),
+                    icons: tree.icons.to_vec(),
                 })
                 .collect(),
             unclassified,
             skill_points,
             english_names: self.skill_id_to_name(),
         })
+    }
+
+    /// 某个技能 ID 的图标（PNG data URL）。
+    ///
+    /// 图标按「职业 + 编号」存，编号来自技能树表；查不到时返回 `None`，
+    /// 界面会退化成用技能名前两字占位。
+    pub fn skill_icon(&mut self, skill_id: u16) -> Option<String> {
+        let class_name = {
+            let session = self.session().ok()?;
+            format!("{:?}", session.file.save.character.class)
+        };
+        let class_code = self.class_code_of(&class_name)?;
+        let trees = d2r_data::skilltree::trees_for_class(&class_code)?;
+        let english = self.skill_id_to_name().remove(&skill_id.to_string())?;
+        let (tree_index, slot) = d2r_data::skilltree::locate_skill(&english, trees)?;
+        let icon = *trees[tree_index].icons.get(slot)?;
+        if icon == 0 {
+            return None;
+        }
+        crate::bundle::skill_icon(&class_code, icon)
     }
 
     /// 技能 ID → 英文技能名（供界面按名字找图标）。
@@ -760,7 +782,6 @@ impl Workspace {
                     .into_iter()
                     .enumerate()
                     .map(|(act, slots)| {
-                        let real_act_count = d2r_core::quest_count_of_act(act);
                         slots
                             .into_iter()
                             .enumerate()
@@ -773,8 +794,7 @@ impl Workspace {
                                     flags,
                                     d2r_core::QUEST_COMPLETE_MASK,
                                 ),
-                                editable: self.quest_namer.is_real_quest(act, slot)
-                                    && slot <= real_act_count,
+                                editable: self.quest_namer.is_real_quest(act, slot),
                             })
                             .collect()
                     })
@@ -1632,10 +1652,53 @@ impl Workspace {
             .unwrap_or(0)
     }
 
+    /// 某等级对应的**总经验值**（按当前职业查 `experience.txt`）。
+    ///
+    /// 表里的 `Level` 列是 0 基：等级 L 对应 `Level = L-1`
+    /// （L1 → 0、L2 → 500、L99 → 3520485254）。改等级时一起写经验，
+    /// 否则游戏会按旧经验重新判定等级，出现"改完又弹回去"。
+    fn experience_for_level(&mut self, level: u8) -> Result<i64, AppError> {
+        let class_name = {
+            let session = self.session()?;
+            format!("{:?}", session.file.save.character.class)
+        };
+        let table = self
+            .tables
+            .get("experience")
+            .ok_or_else(|| AppError::new("data", "缺少 experience 表，无法换算等级经验"))?;
+        let row = table
+            .find_row_by("Level", &level.saturating_sub(1).to_string())
+            .ok_or_else(|| {
+                AppError::new("data", format!("experience 表里没有等级 {level} 对应行"))
+            })?;
+        table.int(row, &class_name).ok_or_else(|| {
+            AppError::new(
+                "data",
+                format!("experience 表里没有职业 {class_name} 的经验列"),
+            )
+        })
+    }
+
     /// 应用修改（原子：任一条失败全部回滚）。
+    ///
+    /// `SetLevel` 会在应用层补齐经验值：等级与经验必须同步，
+    /// 前端只传等级，经验表由数据包提供。
     pub fn apply(&mut self, edits: &[EditRequest]) -> Result<usize, AppError> {
+        let mut expanded: Vec<Edit> = Vec::with_capacity(edits.len() + 1);
+        for edit in edits {
+            match edit {
+                Edit::SetLevel { level, .. } => {
+                    let experience = self.experience_for_level(*level)?;
+                    expanded.push(Edit::SetLevel {
+                        level: *level,
+                        experience: Some(experience),
+                    });
+                }
+                other => expanded.push(other.clone()),
+            }
+        }
         let session = self.session_mut()?;
-        session.apply_all(edits)?;
+        session.apply_all(&expanded)?;
         Ok(edits.len())
     }
 
@@ -1831,7 +1894,7 @@ fn class_short_zh(code: &str) -> String {
         "bar" => "野蛮人",
         "dru" => "德鲁伊",
         "ass" => "刺客",
-        "war" => "巫师",
+        "war" => "术士",
         // 未知职业原样显示，便于排查
         other => other,
     }
@@ -1848,47 +1911,6 @@ fn class_name_zh(english: &str) -> &str {
         "Druid" => "德鲁伊",
         "Assassin" => "刺客",
         "Warlock" => "术士",
-        other => other,
-    }
-}
-/// 技能树名的中文（按游戏界面用词）。
-///
-/// 这些名字**不在字符串表里**——游戏界面上确实显示它们，但字符串存在界面代码
-/// 里而不是数据表里（查过 `ui.json`/`skills.json` 都没有）。所以只能写死。
-/// 认不出来时原样返回英文，至少不会显示成空白。
-fn tree_name_zh(english: &str) -> &str {
-    match english {
-        // 法师
-        "Fire Spells" => "火系",
-        "Cold Spells" => "冰系",
-        "Lightning Spells" => "电系",
-        // 亚马逊
-        "Bow and Crossbow" => "弓与弩",
-        "Passive and Magic" => "被动与魔法",
-        "Javelin and Spear" => "标枪与长矛",
-        // 死灵法师
-        "Summoning Skills" => "召唤",
-        "Poison and Bone" => "毒素与白骨",
-        "Curses" => "诅咒",
-        // 圣骑士
-        "Combat Skills" => "作战技能",
-        "Offensive Auras" => "攻击灵气",
-        "Defensive Auras" => "防御灵气",
-        // 野蛮人
-        "Combat Masteries" => "战斗专精",
-        "Warcries" => "战吼",
-        // 德鲁伊
-        "Elemental" => "元素",
-        "Shape Shifting" => "变形",
-        "Summoning" => "召唤",
-        // 刺客
-        "Martial Arts" => "武艺",
-        "Traps" => "陷阱",
-        "Shadow Disciplines" => "影子训练",
-        // 某个 mod 自创职业（术士）；原版没有对应资料，按数据顺序切的三组
-        "Summoning and Blood" => "召唤与血祭",
-        "Hexes and Combat" => "咒术与战技",
-        "Sigils and Elements" => "印记与元素",
         other => other,
     }
 }

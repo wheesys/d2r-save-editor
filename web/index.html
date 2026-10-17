@@ -47,23 +47,17 @@
           <h2>角色</h2>
           <div class="grid">
             <label>等级 <input id="f-level" type="number" min="1" max="99" /></label>
-            <label>力量 <input id="f-strength" type="number" min="0" /></label>
-            <label>敏捷 <input id="f-dexterity" type="number" min="0" /></label>
-            <label>体力 <input id="f-vitality" type="number" min="0" /></label>
-            <label>精力 <input id="f-energy" type="number" min="0" /></label>
-            <label>属性点 <input id="f-stat-points" type="number" min="0" /></label>
-            <label>技能点 <input id="f-skill-points" type="number" min="0" /></label>
-            <label>身上金币 <input id="f-gold" type="number" min="0" /></label>
-            <label>储物箱金币 <input id="f-stash-gold" type="number" min="0" /></label>
-            <label>生命 <input id="f-hp" type="number" min="0" /></label>
-            <label>法力 <input id="f-mana" type="number" min="0" /></label>
-            <label>体力值 <input id="f-stamina" type="number" min="0" /></label>
-            <label>经验 <input id="f-experience" type="number" min="0" /></label>
+            <label>力量 <input id="f-strength" type="number" min="0" max="1023" /></label>
+            <label>敏捷 <input id="f-dexterity" type="number" min="0" max="1023" /></label>
+            <label>体力 <input id="f-vitality" type="number" min="0" max="1023" /></label>
+            <label>精力 <input id="f-energy" type="number" min="0" max="1023" /></label>
+            <label>属性点 <input id="f-stat-points" type="number" min="0" max="1023" /></label>
+            <label>技能点 <input id="f-skill-points" type="number" min="0" max="255" /></label>
+            <label>身上金币 <input id="f-gold" type="number" min="0" max="33554431" /></label>
+            <label>储物箱金币 <input id="f-stash-gold" type="number" min="0" max="33554431" /></label>
+            <label>经验 <input id="f-experience" type="number" min="0" readonly title="随等级自动计算" /></label>
           </div>
           <p class="muted" id="char-readonly"></p>
-          <div class="actions">
-            <button id="btn-apply-char" class="primary">应用角色修改</button>
-          </div>
         </section>
       </section>
 
@@ -75,11 +69,10 @@
           <div id="skills-head" class="skills-head"></div>
           <p class="muted">
             按游戏的<strong>三系技能树</strong>排列，方块里是技能图标，下面的数字是该技能等级。
-            改完点「应用技能修改」，再点上方「保存」才写入文件。
+            改数字即时生效；点上方「保存」才写入文件。
           </p>
           <div id="skills" class="skill-trees"></div>
           <div id="skills-unclassified"></div>
-          <div class="actions"><button id="btn-apply-skills" class="primary">应用技能修改</button></div>
         </section>
       </section>
 
@@ -127,9 +120,8 @@
             <button id="btn-export-all-items">导出全部物品…</button>
           </div>
           <div id="items-stats" class="muted"></div>
-          <p class="muted">逐条改「耐久 / 数量 / 孔数」后点「应用物品修改」；点某一行打开属性窗口。</p>
+          <p class="muted">逐条改「耐久 / 数量 / 孔数」即时生效；点某一行打开属性窗口。</p>
           <div class="actions">
-            <button id="btn-apply-items" class="primary">应用物品修改</button>
             <button id="btn-import-item">导入物品（蓝图 JSON）…</button>
           </div>
           <div class="table-wrap"><table id="items"></table></div>

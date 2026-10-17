@@ -403,13 +403,26 @@ button.mini.danger { border-color: #7f3b3b; color: #ffb4b4; }
   text-align: center;
 }
 
-/* 每棵树 2 列 × 5 行，和游戏里的技能树形态一致 */
+/* 每棵树 6 行 × 3 列，左侧一列显示该排的等级门槛 */
 .skill-grid {
   display: grid;
-  /* 游戏里每系是**三列**（左中右三条线），这里必须写 3，
+  /* 游戏里每系是**三列**（左中右三条线），再加最左边的等级列，必须写 4；
    * 曾经写成 2 列，导致技能被挤成两列、形状完全不对。 */
-  grid-template-columns: repeat(3, 78px);
+  grid-template-columns: 32px repeat(3, 78px);
   gap: 8px;
+  align-items: stretch;
+}
+
+/* 每排的等级门槛（同一排技能门槛相同） */
+.skill-level {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--muted);
+  border-right: 1px solid var(--line);
+  padding-right: 4px;
+  white-space: nowrap;
 }
 
 .skill-cell {

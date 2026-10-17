@@ -76,7 +76,10 @@ fn edit_save_reopen_roundtrip() {
     let new_level = if before.level == 99 { 98 } else { 99 };
     session
         .apply_all(&[
-            Edit::SetLevel { level: new_level },
+            Edit::SetLevel {
+                level: new_level,
+                experience: Some(123_456_789),
+            },
             Edit::SetStat {
                 stat: 0,
                 value: 321,
@@ -92,6 +95,7 @@ fn edit_save_reopen_roundtrip() {
 
     let after = session.character();
     assert_eq!(after.level, new_level);
+    assert_eq!(after.experience, 123_456_789, "经验应与等级同步写入");
     assert_eq!(after.strength, 321);
     assert_eq!(after.dexterity, 234);
     assert!(session.is_dirty());
@@ -110,6 +114,7 @@ fn edit_save_reopen_roundtrip() {
     let reopened = EditSession::open(&work).expect("重新打开");
     let v = reopened.character();
     assert_eq!(v.level, new_level);
+    assert_eq!(v.experience, 123_456_789);
     assert_eq!(v.strength, 321);
     assert_eq!(v.dexterity, 234);
     assert_eq!(reopened.file.save.skills.level(0), 7);
@@ -137,7 +142,16 @@ fn invalid_edits_are_rejected_atomically() {
     let before = session.character();
 
     // 第二条非法（等级 0）→ 整批回滚，第一条也不能生效
-    let r = session.apply_all(&[Edit::SetLevel { level: 42 }, Edit::SetLevel { level: 0 }]);
+    let r = session.apply_all(&[
+        Edit::SetLevel {
+            level: 42,
+            experience: None,
+        },
+        Edit::SetLevel {
+            level: 0,
+            experience: None,
+        },
+    ]);
     assert!(r.is_err(), "非法修改必须报错");
     let after = session.character();
     assert_eq!(after.level, before.level, "整批应回滚");
@@ -150,7 +164,12 @@ fn verify_does_not_touch_disk() {
     let work = work_copy(&src, "edit_verify_only");
 
     let mut session = EditSession::open(&work).expect("打开");
-    session.apply(Edit::SetLevel { level: 50 }).expect("改等级");
+    session
+        .apply(Edit::SetLevel {
+            level: 50,
+            experience: None,
+        })
+        .expect("改等级");
     let mtime_before = std::fs::metadata(&work).unwrap().modified().unwrap();
 
     // verify 只写出到内存

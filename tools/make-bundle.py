@@ -73,6 +73,12 @@ def collect() -> list[tuple[pathlib.Path, pathlib.Path]]:
             if p.is_file():
                 out.append((p, p.relative_to(DST)))
 
+    # 技能图标同样是本机产物（扁平存放，构建脚本只收顶层文件）。
+    skillicons_dir = DST / "skillicons"
+    if skillicons_dir.is_dir():
+        for p in sorted(skillicons_dir.glob("*.png")):
+            out.append((p, p.relative_to(DST)))
+
     return out
 
 

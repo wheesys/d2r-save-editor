@@ -5,52 +5,62 @@
 //! ```text
 //! 存档任务槽（每幕 16 位位集，Act I–IV 各 8 槽、Act V 16 槽）
 //!        │
-//!        └──→ 槽 0 = 该幕序章；槽 1..=6 = 真任务；槽 7 = 该幕收尾（无名字）
+//!        └──→ 槽位范围由调用方给出（Act V 从槽 3 开始，不是 1）
 //!                 │
-//!                 └─ 文本表 `qstsa<幕>q<槽>` → 中文名
+//!                 └─ 文本表 `qstsa<幕>q<任务序号>` → 中文名
 //! ```
 //!
-//! 已核对：Act I 的槽 1..7 依次是"邪恶洞穴 / 修女的埋骨地 / 交易的工具 /
+//! 已核对：Act I 的槽 1..6 依次是"邪恶洞穴 / 修女的埋骨地 / 交易的工具 /
 // 搜寻凯恩 / 遗忘之塔 / 为了姐妹们"，与存档里这些槽被推进的实际情况一致。
 
 use crate::strings::Strings;
 
-/// 单幕最多几个真任务（槽 1..=6）。
+/// 单幕最多几个真任务。
 pub const MAX_QUESTS_PER_ACT: usize = 6;
 
 /// 任务名表。
 #[derive(Debug, Clone, Default)]
 pub struct QuestNamer {
-    /// 下标 `[act][slot]`（act 0..=4，slot 0..=7）。空串表示没有这个名字。
+    /// 下标 `[act][slot]`（act 0..=4，slot 0..=15）。空串表示没有这个名字。
     names: Vec<Vec<String>>,
+    /// `[act] = (起始槽, 任务数)`，存档布局由调用方给出（见 `d2r_core`）。
+    layout: Vec<(usize, usize)>,
 }
 
 impl QuestNamer {
     /// 从文本表构建。
     ///
-    /// `qstsa<幕>q<槽>`：幕从 1 开始、槽从 0 开始，与存档的段/槽编号对应。
-    pub fn new(strings: &Strings) -> Self {
+    /// `qstsa<幕>q<任务序号>`：幕从 1 开始、任务序号从 1 开始。任务序号到槽位
+    /// 的对应关系由 `layout` 给出（Act V 的六个任务从槽 3 开始，不能写死成 1）。
+    pub fn new(strings: &Strings, layout: &[(usize, usize)]) -> Self {
         let mut names = Vec::with_capacity(5);
         for act in 1..=5 {
-            let mut row = Vec::with_capacity(8);
-            for slot in 0..8 {
-                let key = format!("qstsa{act}q{slot}");
-                let text = match strings.text(&key) {
-                    Some(t) if !t.is_empty() => t.to_string(),
-                    _ => {
-                        // Act V 没有 `qstsa5q0`（序章），用统一的占位名
-                        if slot == 0 {
-                            format!("第{act}幕序章")
-                        } else {
-                            String::new()
-                        }
-                    }
-                };
-                row.push(text);
+            // 每幕都是 16 槽位段；任务名按 layout 放到对应槽位
+            let mut row = vec![String::new(); 16];
+            let (start, count) = layout
+                .get(act - 1)
+                .copied()
+                .unwrap_or((1, MAX_QUESTS_PER_ACT));
+            for quest in 1..=count {
+                let slot = start + quest - 1;
+                if slot >= row.len() {
+                    break;
+                }
+                let key = format!("qstsa{act}q{quest}");
+                if let Some(text) = strings.text(&key).filter(|t| !t.is_empty()) {
+                    row[slot] = text.to_string();
+                }
+            }
+            // 槽 0 是序章/事件位，给个占位名（它不是任务，界面不会列出来）
+            if row[0].is_empty() {
+                row[0] = format!("第{act}幕序章");
             }
             names.push(row);
         }
-        Self { names }
+        Self {
+            names,
+            layout: layout.to_vec(),
+        }
     }
 
     /// 取任务名；下标越界或没有名字时返回 `幕<act+1> 槽<slot>`。
@@ -75,9 +85,14 @@ impl QuestNamer {
         self.len() == 0
     }
 
-    /// 该槽是否是一个真任务（槽 1..=7 且名字解析成功）。
+    /// 该槽是否是一个真任务（落在该幕的任务槽范围内且名字解析成功）。
     pub fn is_real_quest(&self, act: usize, slot: usize) -> bool {
-        (1..=MAX_QUESTS_PER_ACT).contains(&slot)
+        let (start, count) = self
+            .layout
+            .get(act)
+            .copied()
+            .unwrap_or((1, MAX_QUESTS_PER_ACT));
+        (start..start + count).contains(&slot)
             && self
                 .names
                 .get(act)
@@ -169,7 +184,8 @@ mod tests {
                 strings.merge(Strings::from_json_bytes(text.as_bytes()));
             }
         }
-        let namer = QuestNamer::new(&strings);
+        let layout = [(1, 6), (1, 6), (1, 6), (1, 3), (3, 6)];
+        let namer = QuestNamer::new(&strings, &layout);
 
         // Act I 的槽 1..7 必须是这 7 个任务（已与真实存档核对）
         let act1: Vec<String> = (1..=6).map(|s| namer.name_of(0, s)).collect();
@@ -181,15 +197,22 @@ mod tests {
         assert_eq!(act1[5], "为了姐妹们");
         assert_eq!(act1[5], "为了姐妹们");
 
-        // Act V 的 6 个任务
-        assert_eq!(namer.name_of(4, 1), "哈洛加斯围城战");
-        assert_eq!(namer.name_of(4, 6), "毁灭前夕");
+        // Act V 的六个任务从槽 3 开始（槽 0..2 是事件/对话/未使用）
+        assert_eq!(namer.name_of(4, 3), "哈洛加斯围城战");
+        assert_eq!(namer.name_of(4, 8), "毁灭前夕");
+        assert!(!namer.is_real_quest(4, 1), "Act V 槽 1 不是任务");
+        assert!(
+            !namer.is_real_quest(4, 9),
+            "Act V 槽 9 是阿卡拉洗点，不是任务"
+        );
 
         // 真任务：Act I/II/III/V 各 6 个、Act IV 3 个 = 27 个
-        let real: usize = (0..5)
-            .map(|a| {
-                (1..=MAX_QUESTS_PER_ACT)
-                    .filter(|s| namer.is_real_quest(a, *s))
+        let real: usize = layout
+            .iter()
+            .enumerate()
+            .map(|(act, (start, count))| {
+                (*start..*start + *count)
+                    .filter(|slot| namer.is_real_quest(act, *slot))
                     .count()
             })
             .sum();
@@ -197,8 +220,8 @@ mod tests {
         assert_eq!(namer.name_of(3, 3), "地狱熔炉", "Act IV 第 3 个任务");
         println!("Act I 槽1..6 = {act1:?}");
         println!(
-            "Act V 槽1..6 = {:?}",
-            (1..=6).map(|s| namer.name_of(4, s)).collect::<Vec<_>>()
+            "Act V 槽3..8 = {:?}",
+            (3..=8).map(|s| namer.name_of(4, s)).collect::<Vec<_>>()
         );
     }
 }

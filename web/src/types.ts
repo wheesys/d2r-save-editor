@@ -265,11 +265,17 @@ export interface QuestDifficultyDto {
 /** 技能树（后端的 SkillsViewDto）。 */
 export interface SkillTreeDto {
   name: string;
+  /** 6 行 × 3 列行优先；空位是 skillId/name 都为 null 的占位项 */
   skills: SkillDto[];
+  /** 与 skills 一一对应的等级门槛（0 表示空位） */
+  levels: number[];
+  /** 与 skills 一一对应的图标编号（1..30，0 表示空位） */
+  icons: number[];
 }
 
 export interface SkillsViewDto {
   classCode: string;
+  className: string;
   trees: SkillTreeDto[];
   unclassified: SkillDto[];
   skillPoints: number;

@@ -99,10 +99,14 @@ pub struct SkillDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillTreeDto {
-    /// 树名（中文，按职业查内置对照表）。
+    /// 树名（游戏内中文名）。
     pub name: String,
-    /// 该树的技能，顺序即游戏里的排列顺序。
+    /// 该树的技能，顺序即游戏里的排列顺序（6 行 × 3 列行优先）。
     pub skills: Vec<SkillDto>,
+    /// 与 [`Self::skills`] 一一对应的等级门槛（0 表示空格）。
+    pub levels: Vec<u8>,
+    /// 与 [`Self::skills`] 一一对应的图标编号（1..=30，0 表示空格）。
+    pub icons: Vec<u8>,
 }
 
 /// 技能页视图：按游戏的"三系技能树"分组。
@@ -111,6 +115,8 @@ pub struct SkillTreeDto {
 pub struct SkillsViewDto {
     /// 职业代码（`PlayerClass.txt` 的 `Code`，如 `sor`；读不到时为空）。
     pub class_code: String,
+    /// 职业中文名（界面显示用）。
+    pub class_name: String,
     /// 三棵树。职业未知时为**空表**（此时界面退回平铺列表，不要瞎猜归属）。
     pub trees: Vec<SkillTreeDto>,
     /// 未被归类的技能（正常情况下应为空；不为空时界面会照样列出来，

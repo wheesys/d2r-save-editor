@@ -61,6 +61,21 @@ pub fn item_icons() -> Vec<(String, String)> {
     out
 }
 
+/// 技能图标：`skillicons/{职业}-{编号:02}.png` 的 data URL。
+///
+/// 编号来自 `skilldesc.txt` 的 `IconCel`（见 `d2r_data::skilltree`），
+/// 0 表示空格，直接返回 `None`。缺数据包时同样返回 `None`，界面退化成文字。
+pub fn skill_icon(class_code: &str, icon: u8) -> Option<String> {
+    if icon == 0 {
+        return None;
+    }
+    let bytes = raw_of(&format!(
+        "skillicons/{}-{icon:02}.png",
+        class_code.to_ascii_lowercase()
+    ))?;
+    Some(png_data_url(&bytes))
+}
+
 /// 图标的原始字节（给需要自己处理的调用方）。
 pub fn icon_bytes(file_name: &str) -> Option<Vec<u8>> {
     raw_of(&format!("icons/{file_name}"))

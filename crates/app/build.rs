@@ -30,6 +30,7 @@ fn main() {
     println!("cargo:rerun-if-changed=data-bundle/excel");
     println!("cargo:rerun-if-changed=data-bundle/strings");
     println!("cargo:rerun-if-changed=data-bundle/icons");
+    println!("cargo:rerun-if-changed=data-bundle/skillicons");
     println!("cargo:rerun-if-changed=data-bundle/library");
 
     let profile = std::env::var("PROFILE").unwrap_or_default();
@@ -59,7 +60,7 @@ fn main() {
     let mut raw_total = 0usize;
     let mut comp_total = 0usize;
     // `library` 是装备库（tools/make-library.py 的产物），与其它分组一样内嵌。
-    for group in ["excel", "strings", "icons", "library"] {
+    for group in ["excel", "strings", "icons", "skillicons", "library"] {
         let dir = bundle.join(group);
         let Ok(rd) = std::fs::read_dir(&dir) else {
             continue;
