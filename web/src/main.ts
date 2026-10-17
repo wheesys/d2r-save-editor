@@ -1296,7 +1296,7 @@ async function loadIcons() {
  */
 function renderEmptyState() {
   const placeholders: [string, string][] = [
-    ["#char-section", "这里显示角色属性、金币与经验。"],
+    // 角色页（首页）不再显示"这里显示角色属性…"这类占位文案（用户要求）
     ["#skills-section", "这里显示该角色的技能加点。"],
     ["#waypoints-section", "这里显示三个难度的小站开通情况。"],
     ["#quests-section", "这里显示各幕任务进度（未开始 / 进行中 / 已完成）。"],
