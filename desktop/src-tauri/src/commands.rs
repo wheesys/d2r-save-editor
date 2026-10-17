@@ -193,6 +193,14 @@ pub fn import_item(
 pub fn export_item(state: State<'_, AppState>, index: usize) -> R<d2r_core::ItemBlueprint> {
     state.0.lock().unwrap().export_blueprint(index)
 }
+
+/// 导出当前存档的**全部物品**（数组，每项一个蓝图）。
+///
+/// 与 `export_item` 的区别：一次导出整栏，便于备份/迁移整套装备。
+#[tauri::command]
+pub fn export_items(state: State<'_, AppState>) -> R<Vec<d2r_core::ItemBlueprint>> {
+    state.0.lock().unwrap().export_blueprints()
+}
 /// 把物品蓝图写到文件。
 #[tauri::command]
 pub fn write_blueprint(path: String, json: String) -> R<String> {

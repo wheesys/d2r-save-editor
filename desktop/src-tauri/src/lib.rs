@@ -71,6 +71,7 @@ pub fn run() {
             commands::item_detail,
             commands::stat_catalog,
             commands::import_item,
+            commands::export_items,
             commands::export_item,
             commands::write_blueprint,
             commands::read_blueprint,

@@ -1389,6 +1389,9 @@ function bind() {
 
   $("#btn-quests-all").addEventListener("click", () => void completeAllQuests());
 
+  // 导出整栏物品
+  $("#btn-export-all-items").addEventListener("click", () => void exportAllItems());
+
   // 装备库导入弹窗（搜索 / 类型筛选 / 导入 / 关闭）
   $("#btn-lib-import").addEventListener("click", () => void importLibraryNow());
   $("#lib-search").addEventListener("input", renderLibraryItems);
@@ -1596,6 +1599,7 @@ function showItemMenu(target: ItemMenuTarget, x: number, y: number) {
       ? [
           { label: "编辑属性", action: () => void selectItem(target.index) },
           { label: "复制这件", action: () => void duplicateItemNow(target.index) },
+          { label: "导出这件…", action: () => void exportItemNow(target.index) },
           { label: "从装备库导入…", action: () => void openLibrary() },
           { label: "从文件导入…", action: () => void importFromFile() },
         ]
@@ -1750,5 +1754,63 @@ async function importFromFile() {
     await loadAll();
   } catch (e) {
     showError(e, "从文件导入失败");
+  }
+}
+
+/**
+ * 导出单件物品为 JSON 蓝图。
+ *
+ * 蓝图里既有塑形信息（代码/品质）也有全部属性，配合「从文件导入」可以
+ * 在存档之间搬运物品；右键菜单里直接可用，不必先打开属性窗。
+ */
+async function exportItemNow(index: number) {
+  try {
+    const bp = await call<unknown>("export_item", { index });
+    const dest = await saveDialog({
+      defaultPath: `item-${index}.json`,
+      filters: [{ name: "物品蓝图", extensions: ["json"] }],
+    });
+    if (!dest || typeof dest !== "string") return;
+    await call<string>("write_blueprint", {
+      path: dest,
+      json: JSON.stringify(bp, null, 2),
+    });
+    toast(`已导出到 ${dest}`);
+  } catch (e) {
+    showError(e, "导出物品失败");
+  }
+}
+
+/**
+ * 导出**当前存档的全部物品**为一份 JSON（数组，每项一个蓝图）。
+ *
+ * 与单件导出的区别：这里导的是整栏，便于备份/迁移整套装备。
+ * 文件里同时写入导出时间与物品数量，方便日后分辨。
+ */
+async function exportAllItems() {
+  try {
+    const list = await call<unknown[]>("export_items");
+    if (!Array.isArray(list) || list.length === 0) {
+      toast("这件存档里没有可导出的物品", "error");
+      return;
+    }
+    const dest = await saveDialog({
+      defaultPath: "items.json",
+      filters: [{ name: "物品蓝图", extensions: ["json"] }],
+    });
+    if (!dest || typeof dest !== "string") return;
+    const payload = {
+      // 只写"导了多少件、什么时候导的"，不写存档路径等本地信息
+      exportedAt: new Date().toISOString(),
+      count: list.length,
+      items: list,
+    };
+    await call<string>("write_blueprint", {
+      path: dest,
+      json: JSON.stringify(payload, null, 2),
+    });
+    toast(`已导出 ${list.length} 件物品到 ${dest}`);
+  } catch (e) {
+    showError(e, "导出物品栏失败");
   }
 }

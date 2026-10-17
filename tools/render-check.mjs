@@ -401,6 +401,13 @@ console.log("=== 8. 右键菜单与装备库导入 ===");
   // 装备库数据是构建期生成、内嵌、只解析一次
   const lib = readFileSync(new URL("../crates/app/src/library.rs", import.meta.url), "utf8");
   check("装备库解析结果有缓存", lib.includes("OnceLock"));
+
+  // 导出：右键可导出单件，物品栏可导出整栏
+  check("右键菜单有导出", js.includes("导出这件"));
+  check("有导出实现", js.includes("exportItemNow") && js.includes("exportAllItems"));
+  check("物品栏有导出按钮", page.includes('id="btn-export-all-items"'));
+  check("导出整栏走后端命令", js.includes('"export_items"'));
+  check("导出写入文件复用 write_blueprint", js.includes('"write_blueprint"'));
 }
 
 console.log("");
