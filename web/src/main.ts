@@ -207,7 +207,8 @@ function skillCell(s: SkillDto): string {
   const icon = skillIcons[iconCodeOf(s)] ?? "";
   const art = icon
     ? `<img src="${icon}" alt="" />`
-    : `<span class="skill-fallback">${s.name ? "" : "?"}</span>`;
+    // 没有技能图标数据源时，用技能名前两字占位（空白格子看不出是什么）
+    : `<span class="skill-fallback">${escapeHtml((s.name ?? "?").slice(0, 2))}</span>`;
   const zeroCls = s.level > 0 ? "" : " zero";
   const title = `槽位 ${s.index}｜技能ID ${s.skillId ?? "?"}｜${s.name ?? "（未解析）"}`;
   return `<div class="skill-cell${zeroCls}" title="${escapeAttr(title)}">
